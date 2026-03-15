@@ -24,11 +24,10 @@ jobs:
             label: Linux
             platform: linux
             bundles: appimage,deb
-          # macOS can be added later with a new matrix entry:
-          # - os: macos-latest
-          #   label: macOS
-          #   platform: macos
-          #   bundles: app,dmg
+          - os: macos-latest
+            label: macOS
+            platform: macos
+            bundles: dmg
 
     steps:
       - name: Check out source
@@ -86,3 +85,4 @@ jobs:
             src-tauri/target/release/bundle/**/*.msi
             src-tauri/target/release/bundle/**/*.AppImage
             src-tauri/target/release/bundle/**/*.deb
+            src-tauri/target/release/bundle/**/*.dmg

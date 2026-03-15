@@ -93,7 +93,7 @@ This repository includes a GitHub Actions workflow at `.github/workflows/release
 
 For each published release, GitHub Actions:
 
-- runs on `windows-latest` and `ubuntu-latest`
+- runs on GitHub-hosted `windows-latest`, `ubuntu-latest`, and `macos-latest` runners
 - installs Node.js, Rust, and the required Tauri build dependencies
 - installs npm dependencies with `npm ci`
 - verifies that the version metadata matches across:
@@ -106,16 +106,13 @@ For each published release, GitHub Actions:
 
 ### What files get uploaded
 
-The workflow currently uploads the standard Windows and Linux distributables produced by Tauri for this project:
+The workflow currently uploads the standard desktop distributables produced by Tauri for this project:
 
 - Windows: `*.exe`, `*.msi`
 - Linux: `*.AppImage`, `*.deb`
+- macOS: `*.dmg`
 
 Artifacts appear directly on the GitHub Release that triggered the workflow.
-
-### macOS later
-
-The workflow matrix is already structured so macOS can be added later with one more matrix entry. It is intentionally not required for the current Windows + Linux release pipeline.
 
 ## Versioning
 
@@ -166,7 +163,7 @@ git push origin v0.1.0
 
 4. Create or publish the GitHub Release for that tag.
 5. Wait for the `Release` workflow to finish.
-6. Download the generated Windows and Linux assets from the release page.
+6. Download the generated Windows, Linux, and macOS assets from the release page.
 
 ## First release checklist
 
@@ -180,7 +177,7 @@ Before the first GitHub release, do these manual steps:
 
 ## Signing notes
 
-This pipeline is designed to work without code signing for the initial Windows + Linux release flow.
+This pipeline is designed to work without code signing for the initial Windows, Linux, and macOS release flow.
 
 If you add signing later, keep the workflow structure and add the appropriate secrets for your chosen signing setup. Common additions later include:
 
