@@ -138,3 +138,51 @@ jobs:
             src-tauri/target/release/bundle/**/*.app.tar.gz
             src-tauri/target/release/bundle/**/*.dmg
             src-tauri/target/release/bundle/**/*.sig
+
+  publish-main-release:
+    name: Publish rolling main release
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    needs:
+      - build-release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: obs-plugin-installer-*-${{ github.sha }}
+          path: release-artifacts
+          merge-multiple: true
+
+      - name: Move rolling release tag
+        run: |
+          git init
+          git remote add origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          git fetch --depth=1 origin "${{ github.ref_name }}"
+          git tag -f main-latest "${{ github.sha }}"
+          git push origin refs/tags/main-latest --force
+
+      - name: Publish rolling release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: main-latest
+          target_commitish: ${{ github.sha }}
+          name: OBS Plugin Installer latest (main)
+          prerelease: true
+          make_latest: false
+          generate_release_notes: false
+          body: |
+            Automated rolling desktop build from `main`.
+
+            Commit: `${{ github.sha }}`
+            Branch: `${{ github.ref_name }}`
+          fail_on_unmatched_files: true
+          files: |
+            release-artifacts/**/*.exe
+            release-artifacts/**/*.msi
+            release-artifacts/**/*.AppImage
+            release-artifacts/**/*.deb
+            release-artifacts/**/*.rpm
+            release-artifacts/**/*.app.tar.gz
+            release-artifacts/**/*.dmg
+            release-artifacts/**/*.sig
