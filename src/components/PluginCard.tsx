@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { ArrowDownToLine, ArrowUpCircle, ShieldCheck } from 'lucide-react'
 
 import { PluginGlyph } from '../lib/pluginVisuals'
@@ -6,9 +7,9 @@ import {
   formatSupportedPlatforms,
   getCatalogPluginState,
   getPluginCompatibility,
+  getPluginTypeLabel,
   getRecommendedPackage,
   hasGitHubReleaseSource,
-  isScriptPlugin,
 } from '../lib/utils'
 import type { InstalledPluginRecord } from '../types/desktop'
 import type { PluginCatalogEntry } from '../types/plugin'
@@ -16,6 +17,11 @@ import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 
 type CatalogViewMode = 'list' | 'grid'
+type MetadataTag = {
+  label: string
+  tone: 'neutral' | 'script' | 'verified'
+  icon: ReactNode
+}
 
 interface PluginCardProps {
   plugin: PluginCatalogEntry
@@ -76,14 +82,15 @@ function ActionControl({
 
   if (isUnavailable) {
     return (
-      <span
+      <Badge
         className={cn(
-          'rounded-lg border border-white/10 px-3 py-2 text-center text-[12px] text-slate-500',
+          'px-3 py-2 text-center text-[12px]',
           viewMode === 'grid' ? 'block w-full' : 'inline-flex items-center justify-center',
         )}
+        tone="warning"
       >
         {compatibilityLabel}
-      </span>
+      </Badge>
     )
   }
 
@@ -120,15 +127,47 @@ export function PluginCard({
   const pluginState = getCatalogPluginState(plugin, installedPlugin)
   const compatibility = getPluginCompatibility(plugin, currentPlatform)
   const recommendedPackage = getRecommendedPackage(plugin, currentPlatform)
-  const isScriptEntry = isScriptPlugin(plugin, installedPlugin)
+  const pluginTypeLabel = getPluginTypeLabel(plugin, installedPlugin)
   const isUnavailable = !compatibility.canInstall
   const isInstalledManaged = pluginState === 'installed'
   const isInstalledExternal = pluginState === 'installed-externally'
   const isUpdateAvailable = pluginState === 'update-available'
   const isAttachPending =
     installedPlugin?.status === 'manual-step' && installedPlugin.sourceType === 'script'
+  const supportedPlatforms =
+    plugin.supportedPlatforms.length > 0
+      ? formatSupportedPlatforms(plugin.supportedPlatforms)
+      : null
+  const metadataItems = [plugin.author, `v${plugin.version}`, supportedPlatforms].filter(Boolean)
+  const metadataTags: MetadataTag[] = []
+  const seenMetadataTagLabels = new Set<string>()
 
-  const metaLine = `${plugin.author} • ${plugin.category} • v${plugin.version}`
+  function pushMetadataTag(tag: MetadataTag | null) {
+    if (!tag || seenMetadataTagLabels.has(tag.label)) {
+      return
+    }
+
+    seenMetadataTagLabels.add(tag.label)
+    metadataTags.push(tag)
+  }
+
+  pushMetadataTag(
+    pluginTypeLabel === 'OBS Script'
+      ? { label: 'OBS Script', tone: 'script', icon: null }
+      : plugin.category
+        ? { label: plugin.category, tone: 'neutral', icon: null }
+        : null,
+  )
+
+  pushMetadataTag(
+    plugin.verified
+      ? {
+          label: 'Verified',
+          tone: 'verified',
+          icon: <ShieldCheck className="size-3.5" />,
+        }
+      : null,
+  )
 
   const handleInstall = () =>
     onInstall(plugin.id, {
@@ -142,15 +181,13 @@ export function PluginCard({
     return (
       <article
         className={cn(
-          'flex h-full min-h-[248px] cursor-pointer flex-col rounded-xl border bg-white/[0.04] p-4 transition-colors',
-          isUnavailable
-            ? 'border-white/10 opacity-70'
-            : 'border-white/10 hover:border-primary/30 hover:bg-white/[0.06]',
+          'catalog-card flex h-full min-h-[232px] cursor-pointer flex-col rounded-xl border p-4 transition-colors',
+          isUnavailable ? 'catalog-card-muted opacity-70' : '',
         )}
         onClick={() => onSelect(plugin.id)}
       >
         <div className="flex items-start gap-3">
-          <div className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-primary/12 text-primary">
+          <div className="catalog-card-icon flex size-10 shrink-0 items-center justify-center rounded-lg border text-primary">
             {plugin.iconUrl ? (
               <img
                 alt={`${plugin.name} icon`}
@@ -165,32 +202,41 @@ export function PluginCard({
 
           <div className="min-w-0 flex-1">
             <h3 className="line-clamp-2 text-[16px] font-semibold text-white">{plugin.name}</h3>
-            <p className="mt-1 truncate text-[12px] text-slate-500">{metaLine}</p>
           </div>
         </div>
 
-        <p className="mt-3 line-clamp-2 text-[13px] leading-6 text-slate-300">
+        <p className="mt-3 line-clamp-2 text-[13px] leading-5 text-slate-300">
           {plugin.description}
         </p>
 
-        <div className="mt-3 flex min-h-[56px] flex-wrap content-start gap-2">
-          {plugin.verified ? (
-            <Badge tone="primary">
-              <ShieldCheck className="size-3.5" />
-              Verified
+        <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-slate-500">
+          {metadataItems.map((item, index) => (
+            <div className="contents" key={item}>
+              {index > 0 ? <span>•</span> : null}
+              <span className="truncate">{item}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-3 flex min-h-[48px] flex-wrap content-start gap-2">
+          {metadataTags.map((tag) => (
+            <Badge key={tag.label} tone={tag.tone}>
+              {tag.icon}
+              {tag.label}
             </Badge>
-          ) : null}
-          {isScriptEntry ? <Badge tone="warning">Script Plugin</Badge> : null}
+          ))}
           {isAttachPending ? <Badge tone="warning">Needs OBS attach</Badge> : null}
-          {isInstalledManaged ? <Badge tone="success">Installed</Badge> : null}
-          {isInstalledExternal ? <Badge tone="warning">Installed externally</Badge> : null}
-          {isUpdateAvailable ? <Badge tone="warning">Update available</Badge> : null}
-          {isUnavailable ? <Badge tone="danger">Unsupported</Badge> : null}
         </div>
 
         <div className="mt-auto flex items-center justify-between gap-3 border-t border-white/10 pt-3">
           <span className="truncate text-[12px] text-slate-500">
-            {formatSupportedPlatforms(plugin.supportedPlatforms)}
+            {isInstalledExternal
+              ? 'Detected in OBS folders'
+              : isUpdateAvailable
+                ? 'Update ready'
+                : isInstalledManaged
+                  ? 'Managed by this app'
+                  : compatibility.label}
           </span>
           <div className="w-[132px] shrink-0">
             <ActionControl
@@ -211,14 +257,12 @@ export function PluginCard({
   return (
     <article
       className={cn(
-        'grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 rounded-xl border px-4 py-3 transition-colors',
-        isUnavailable
-          ? 'border-white/10 bg-white/[0.02] opacity-70'
-          : 'border-white/10 bg-white/[0.04] hover:border-primary/30 hover:bg-white/[0.06]',
+        'catalog-card grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-4 rounded-xl border px-4 py-3 transition-colors',
+        isUnavailable ? 'catalog-card-muted opacity-70' : '',
       )}
       onClick={() => onSelect(plugin.id)}
     >
-      <div className="flex size-10 items-center justify-center rounded-lg border border-white/10 bg-primary/12 text-primary">
+      <div className="catalog-card-icon flex size-10 items-center justify-center rounded-lg border text-primary">
         {plugin.iconUrl ? (
           <img
             alt={`${plugin.name} icon`}
@@ -232,33 +276,24 @@ export function PluginCard({
       </div>
 
       <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <h3 className="truncate text-[18px] font-semibold text-white">{plugin.name}</h3>
-          {plugin.verified ? (
-            <Badge tone="primary">
-              <ShieldCheck className="size-3.5" />
-              Verified
-            </Badge>
-          ) : null}
-          {isScriptEntry ? <Badge tone="warning">Script Plugin</Badge> : null}
-          {isAttachPending ? <Badge tone="warning">Needs OBS attach</Badge> : null}
-          {isInstalledManaged ? <Badge tone="success">Installed (managed)</Badge> : null}
-          {isInstalledExternal ? <Badge tone="warning">Installed externally</Badge> : null}
-          {isUpdateAvailable ? <Badge tone="warning">Update available</Badge> : null}
-          {isUnavailable ? (
-            <Badge tone="danger">{compatibility.disabledActionLabel}</Badge>
-          ) : null}
-        </div>
-
+        <h3 className="truncate text-[18px] font-semibold text-white">{plugin.name}</h3>
         <p className="mt-1 text-[14px] text-slate-300">{plugin.description}</p>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-[12px] text-slate-500">
-          <span>{plugin.author}</span>
-          <span>•</span>
-          <span>{plugin.category}</span>
-          <span>•</span>
-          <span>v{plugin.version}</span>
-          <span>•</span>
-          <span>{formatSupportedPlatforms(plugin.supportedPlatforms)}</span>
+          {metadataItems.map((item, index) => (
+            <div className="contents" key={item}>
+              {index > 0 ? <span>•</span> : null}
+              <span>{item}</span>
+            </div>
+          ))}
+        </div>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          {metadataTags.map((tag) => (
+            <Badge key={tag.label} tone={tag.tone}>
+              {tag.icon}
+              {tag.label}
+            </Badge>
+          ))}
+          {isAttachPending ? <Badge tone="warning">Needs OBS attach</Badge> : null}
         </div>
       </div>
 

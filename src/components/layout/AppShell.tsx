@@ -5,6 +5,7 @@ import { isUpdateAvailable } from '../../lib/utils'
 import { useAppStore } from '../../stores/appStore'
 import { InstallProgressModal } from '../InstallProgressModal'
 import { Button } from '../ui/Button'
+import { CopyPathField } from '../ui/CopyPathField'
 
 const navItems = [
   { to: '/', label: 'Catalog', badge: null },
@@ -22,7 +23,10 @@ export function AppShell() {
   const installProgress = useAppStore((state) => state.installProgress)
   const clearInstallProgress = useAppStore((state) => state.clearInstallProgress)
   const lastInstallResponse = useAppStore((state) => state.lastInstallResponse)
+  const cancelingInstallPluginId = useAppStore((state) => state.cancelingInstallPluginId)
+  const cancelInstall = useAppStore((state) => state.cancelInstall)
   const openExternal = useAppStore((state) => state.openExternal)
+  const openLocalPath = useAppStore((state) => state.openLocalPath)
   const revealPath = useAppStore((state) => state.revealPath)
 
   const installPluginEntry = installProgress
@@ -65,7 +69,7 @@ export function AppShell() {
                   [
                     'flex items-center justify-between rounded-lg px-3 py-2 text-sm transition-colors',
                     isActive
-                      ? 'bg-primary/12 text-white'
+                      ? 'bg-primary text-on-accent'
                       : 'text-slate-400 hover:bg-white/[0.04] hover:text-white',
                   ].join(' ')
                 }
@@ -87,9 +91,18 @@ export function AppShell() {
             <p className="text-[12px] font-semibold uppercase tracking-[0.14em] text-slate-500">
               OBS Path
             </p>
-            <p className="mt-2 break-all text-[12px] leading-6 text-slate-300">
-              {bootstrap?.settings.obsPath ?? 'Not configured'}
-            </p>
+            {bootstrap?.settings.obsPath ? (
+              <CopyPathField
+                buttonClassName="h-7 w-7"
+                className="mt-2"
+                codeClassName="rounded-md bg-transparent px-0 py-0 text-[12px] leading-6 text-slate-300"
+                value={bootstrap.settings.obsPath}
+              />
+            ) : (
+              <p className="mt-2 break-all text-[12px] leading-6 text-slate-300">
+                Not configured
+              </p>
+            )}
           </div>
         </aside>
 
@@ -133,11 +146,26 @@ export function AppShell() {
       </div>
 
       <InstallProgressModal
+        isCanceling={Boolean(
+          installProgress &&
+            cancelingInstallPluginId &&
+            cancelingInstallPluginId === installProgress.pluginId,
+        )}
         lastResponse={lastInstallResponse}
+        onCancelInstall={
+          installProgress
+            ? () => void cancelInstall(installProgress.pluginId)
+            : undefined
+        }
         onClose={clearInstallProgress}
         onOpenInstallFolder={
           lastInstallResponse?.installedPlugin?.installLocation
             ? () => void revealPath(lastInstallResponse.installedPlugin?.installLocation ?? '')
+            : undefined
+        }
+        onOpenInstallerManually={
+          lastInstallResponse?.canOpenInstallerManually && lastInstallResponse.manualInstallerPath
+            ? () => void openLocalPath(lastInstallResponse.manualInstallerPath ?? '')
             : undefined
         }
         onOpenSource={

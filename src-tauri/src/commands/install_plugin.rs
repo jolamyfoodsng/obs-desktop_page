@@ -1,7 +1,11 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 
 use chrono::Utc;
 use reqwest::blocking::{Client, Response};
@@ -24,14 +28,53 @@ use crate::models::plugin::{
     SupportedPlatform,
 };
 use crate::models::state::{
-    GitHubRejectedAsset, GitHubReleaseAssetOption, GitHubReleaseInfo, InstallKind,
-    InstallProgressEvent, InstallRequest, InstallResponse, InstallReviewPlan,
+    CancelInstallResponse, GitHubRejectedAsset, GitHubReleaseAssetOption, GitHubReleaseInfo,
+    InstallKind, InstallProgressEvent, InstallRequest, InstallResponse, InstallReviewPlan,
     InstalledPluginRecord, InstalledPluginSourceType, InstalledPluginStatus,
 };
 use crate::utils::catalog::load_plugin_catalog;
 use crate::utils::errors::AppError;
 
 pub const INSTALL_PROGRESS_EVENT: &str = "install-progress";
+
+#[derive(Default)]
+pub struct InstallCancellationRegistry {
+    installs: Mutex<HashMap<String, Arc<AtomicBool>>>,
+}
+
+impl InstallCancellationRegistry {
+    fn begin(&self, plugin_id: &str) -> Arc<AtomicBool> {
+        let token = Arc::new(AtomicBool::new(false));
+        let mut installs = self
+            .installs
+            .lock()
+            .expect("install cancellation registry lock poisoned");
+        installs.insert(plugin_id.to_string(), token.clone());
+        token
+    }
+
+    fn cancel(&self, plugin_id: &str) -> bool {
+        let installs = self
+            .installs
+            .lock()
+            .expect("install cancellation registry lock poisoned");
+        installs
+            .get(plugin_id)
+            .map(|token| {
+                token.store(true, Ordering::SeqCst);
+                true
+            })
+            .unwrap_or(false)
+    }
+
+    fn finish(&self, plugin_id: &str) {
+        let mut installs = self
+            .installs
+            .lock()
+            .expect("install cancellation registry lock poisoned");
+        installs.remove(plugin_id);
+    }
+}
 
 #[derive(Debug, Clone)]
 struct CopyEntry {
@@ -140,12 +183,55 @@ fn failure_response(
         installed_plugin: None,
         manual_installer_path: None,
         download_path: None,
+        installer_started: false,
+        can_open_installer_manually: false,
         requires_restart: false,
         conflicts: None,
         review_plan: None,
         selected_asset_name: None,
         selected_asset_reason: None,
         github_release_url: None,
+    }
+}
+
+fn canceled_response(plugin_id: &str, message: impl Into<String>, app: &AppHandle) -> InstallResponse {
+    let message = message.into();
+    emit_progress(
+        app,
+        plugin_id,
+        "canceled",
+        100,
+        "Download canceled",
+        Some(message.clone()),
+        true,
+    );
+
+    InstallResponse {
+        success: false,
+        code: Some("CANCELED".to_string()),
+        message,
+        installed_plugin: None,
+        manual_installer_path: None,
+        download_path: None,
+        installer_started: false,
+        can_open_installer_manually: false,
+        requires_restart: false,
+        conflicts: None,
+        review_plan: None,
+        selected_asset_name: None,
+        selected_asset_reason: None,
+        github_release_url: None,
+    }
+}
+
+fn check_canceled(
+    token: &Arc<AtomicBool>,
+    message: &str,
+) -> Result<(), AppError> {
+    if token.load(Ordering::SeqCst) {
+        Err(AppError::canceled(message))
+    } else {
+        Ok(())
     }
 }
 
@@ -173,6 +259,8 @@ fn review_response(
         installed_plugin: None,
         manual_installer_path: None,
         download_path: None,
+        installer_started: false,
+        can_open_installer_manually: false,
         requires_restart: false,
         conflicts: None,
         review_plan: Some(review_plan),
@@ -1228,6 +1316,7 @@ fn write_download_response(
     plugin_name: &str,
     mut response: Response,
     destination: &Path,
+    token: &Arc<AtomicBool>,
 ) -> Result<(), AppError> {
     let total_bytes = response.content_length();
     let mut downloaded_bytes = 0u64;
@@ -1235,6 +1324,14 @@ fn write_download_response(
     let mut buffer = [0u8; 64 * 1024];
 
     loop {
+        if token.load(Ordering::SeqCst) {
+            drop(output);
+            let _ = fs::remove_file(destination);
+            return Err(AppError::canceled(
+                "The download was canceled and the partial file was removed.",
+            ));
+        }
+
         let read = response.read(&mut buffer)?;
         if read == 0 {
             break;
@@ -1274,8 +1371,9 @@ fn download_file(
     plugin: &PluginCatalogEntry,
     package: &PluginPackage,
     destination: &Path,
+    token: &Arc<AtomicBool>,
 ) -> Result<(), AppError> {
-    download_url(app, plugin, &package.download_url, destination)
+    download_url(app, plugin, &package.download_url, destination, token)
 }
 
 fn download_url(
@@ -1283,14 +1381,16 @@ fn download_url(
     plugin: &PluginCatalogEntry,
     download_url: &str,
     destination: &Path,
+    token: &Arc<AtomicBool>,
 ) -> Result<(), AppError> {
+    check_canceled(token, "The install was canceled before download started.")?;
     let response = Client::builder()
         .user_agent("obs-plugin-installer/0.1")
         .build()?
         .get(download_url)
         .send()?
         .error_for_status()?;
-    write_download_response(app, &plugin.id, &plugin.name, response, destination)
+    write_download_response(app, &plugin.id, &plugin.name, response, destination, token)
 }
 
 pub(crate) fn managed_script_root(
@@ -1366,12 +1466,36 @@ fn collect_copy_entries(
     Ok(entries)
 }
 
+fn prune_empty_parent_dirs(start: Option<&Path>) {
+    let mut current = start.map(Path::to_path_buf);
+
+    while let Some(path) = current {
+        let is_empty = fs::read_dir(&path)
+            .map(|mut entries| entries.next().is_none())
+            .unwrap_or(false);
+
+        if !is_empty || fs::remove_dir(&path).is_err() {
+            break;
+        }
+
+        current = path.parent().map(Path::to_path_buf);
+    }
+}
+
+fn cleanup_created_targets(targets: &[PathBuf]) {
+    for target in targets.iter().rev() {
+        let _ = fs::remove_file(target);
+        prune_empty_parent_dirs(target.parent());
+    }
+}
+
 fn copy_entries(
     app: &AppHandle,
     plugin: &PluginCatalogEntry,
     entries: &[CopyEntry],
     overwrite: bool,
     install_label: &str,
+    token: &Arc<AtomicBool>,
 ) -> Result<Vec<String>, InstallResponse> {
     if entries.is_empty() {
         return Err(failure_response(
@@ -1399,6 +1523,8 @@ fn copy_entries(
             installed_plugin: None,
             manual_installer_path: None,
             download_path: None,
+            installer_started: false,
+            can_open_installer_manually: false,
             requires_restart: false,
             conflicts: Some(conflicts),
             review_plan: None,
@@ -1410,8 +1536,19 @@ fn copy_entries(
 
     let total = entries.len();
     let mut tracked_files = Vec::with_capacity(total);
+    let mut created_targets = Vec::new();
 
     for (index, entry) in entries.iter().enumerate() {
+        if token.load(Ordering::SeqCst) {
+            cleanup_created_targets(&created_targets);
+            return Err(canceled_response(
+                &plugin.id,
+                "The install was canceled before all files were copied. Partial files from this run were cleaned up where possible.",
+                app,
+            ));
+        }
+
+        let target_preexisted = entry.target.exists();
         if let Some(parent) = entry.target.parent() {
             if let Err(error) = fs::create_dir_all(parent) {
                 return Err(failure_response(
@@ -1433,6 +1570,10 @@ fn copy_entries(
                 ),
                 app,
             ));
+        }
+
+        if !target_preexisted {
+            created_targets.push(entry.target.clone());
         }
 
         tracked_files.push(entry.relative_target.clone());
@@ -1461,13 +1602,27 @@ fn open_path(target: &Path) -> Result<(), AppError> {
     open::that(target).map_err(|error| AppError::message(error.to_string()))
 }
 
+fn cancel_before_opening_download(
+    token: &Arc<AtomicBool>,
+    download_path: &Path,
+) -> Result<(), AppError> {
+    if token.load(Ordering::SeqCst) {
+        let _ = fs::remove_file(download_path);
+        return Err(AppError::canceled(
+            "The download was canceled and the downloaded file was removed.",
+        ));
+    }
+
+    Ok(())
+}
+
 fn external_install_guidance(
     file_type: Option<&PluginPackageFileType>,
 ) -> (&'static str, &'static str, bool) {
     match file_type {
         Some(PluginPackageFileType::Exe) | Some(PluginPackageFileType::Msi) => (
             "Windows installer",
-            "The Windows installer will open next. Follow the vendor prompts, then reopen OBS if needed.",
+            "The Windows installer started successfully. Follow the vendor prompts, then reopen OBS if needed.",
             false,
         ),
         Some(PluginPackageFileType::Pkg) | Some(PluginPackageFileType::Dmg) => (
@@ -1493,6 +1648,64 @@ fn external_install_guidance(
     }
 }
 
+fn verify_downloaded_installer(download_path: &Path) -> Result<(), AppError> {
+    if !download_path.exists() {
+        return Err(AppError::message(format!(
+            "The installer download finished, but the file could not be found at {}.",
+            download_path.display()
+        )));
+    }
+
+    if !download_path.is_file() {
+        return Err(AppError::message(format!(
+            "The downloaded installer path is not a file: {}.",
+            download_path.display()
+        )));
+    }
+
+    Ok(())
+}
+
+fn launch_windows_installer(download_path: &Path, file_type: &PluginPackageFileType) -> Result<(), AppError> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::process::{Command, Stdio};
+
+        let mut command = match file_type {
+            PluginPackageFileType::Exe => {
+                let mut command = Command::new(download_path);
+                command
+            }
+            PluginPackageFileType::Msi => {
+                let mut command = Command::new("msiexec");
+                command.arg("/i").arg(download_path);
+                command
+            }
+            _ => {
+                return Err(AppError::message(
+                    "Only .exe and .msi packages can be launched automatically on Windows.",
+                ))
+            }
+        };
+
+        command
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+
+        command.spawn()?;
+        return Ok(());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = (download_path, file_type);
+        Err(AppError::message(
+            "Automatic Windows installer launch is only available on Windows.",
+        ))
+    }
+}
+
 fn finalize_external_download(
     app: &AppHandle,
     plugin: &PluginCatalogEntry,
@@ -1502,22 +1715,78 @@ fn finalize_external_download(
     file_type: Option<&PluginPackageFileType>,
 ) -> Result<InstallResponse, AppError> {
     let (_, guidance, open_parent_folder) = external_install_guidance(file_type);
+    let is_windows_installer = matches!(
+        file_type,
+        Some(PluginPackageFileType::Exe) | Some(PluginPackageFileType::Msi)
+    );
 
     emit_progress(
         app,
         &plugin.id,
-        "launching-installer",
-        96,
-        format!("Opening {}", label),
-        Some(guidance.to_string()),
+        "verifying",
+        94,
+        format!("Verifying {}", label),
+        Some(format!(
+            "Checking that the downloaded installer exists at {}.",
+            download_path.display()
+        )),
         false,
     );
 
-    if open_parent_folder {
-        open_path(download_path.parent().unwrap_or(download_path))?;
+    verify_downloaded_installer(download_path)?;
+
+    let mut installer_started = false;
+    let mut can_open_installer_manually = false;
+    let detail = if is_windows_installer {
+        match launch_windows_installer(
+            download_path,
+            file_type.expect("windows installer file type should be set"),
+        ) {
+            Ok(()) => {
+                installer_started = true;
+                emit_progress(
+                    app,
+                    &plugin.id,
+                    "launching-installer",
+                    98,
+                    format!("Launching {}", label),
+                    Some(format!(
+                        "Started {} from {}.",
+                        label.to_ascii_lowercase(),
+                        download_path.display()
+                    )),
+                    false,
+                );
+                guidance.to_string()
+            }
+            Err(error) => {
+                can_open_installer_manually = true;
+                format!(
+                    "The installer was downloaded to {}, but it could not be started automatically: {}. Use “Open installer manually” to continue.",
+                    download_path.display(),
+                    error
+                )
+            }
+        }
     } else {
-        open_path(download_path)?;
-    }
+        emit_progress(
+            app,
+            &plugin.id,
+            "launching-installer",
+            98,
+            format!("Opening {}", label),
+            Some(guidance.to_string()),
+            false,
+        );
+
+        if open_parent_folder {
+            open_path(download_path.parent().unwrap_or(download_path))?;
+        } else {
+            open_path(download_path)?;
+        }
+
+        guidance.to_string()
+    };
 
     let mut state = load_state(app)?;
     let installed_plugin = InstalledPluginRecord {
@@ -1544,25 +1813,42 @@ fn finalize_external_download(
     save_state(app, &state)?;
 
     emit_progress(
-    app,
-    &plugin.id,
-    "manual",
-    100,
-    format!("{} is ready to finish", label),
-    Some(guidance.to_string()),
-    true,
-  );
+        app,
+        &plugin.id,
+        "manual",
+        100,
+        if installer_started {
+            "Installer started".to_string()
+        } else {
+            format!("{} downloaded", label)
+        },
+        Some(detail.clone()),
+        true,
+    );
 
     Ok(InstallResponse {
         success: true,
         code: None,
-        message: format!(
-            "{} downloaded successfully. Finish the vendor installer to complete setup.",
-            plugin.name
-        ),
+        message: if installer_started {
+            format!(
+                "{} downloaded successfully and the installer started.",
+                plugin.name
+            )
+        } else {
+            format!(
+                "{} downloaded successfully, but the installer could not be started automatically.",
+                plugin.name
+            )
+        },
         installed_plugin: Some(installed_plugin),
-        manual_installer_path: Some(download_path.display().to_string()),
+        manual_installer_path: if can_open_installer_manually {
+            Some(download_path.display().to_string())
+        } else {
+            None
+        },
         download_path: Some(download_path.display().to_string()),
+        installer_started,
+        can_open_installer_manually,
         requires_restart: false,
         conflicts: None,
         review_plan: None,
@@ -1613,11 +1899,17 @@ fn finalize_archive_download(
     file_type: &PluginPackageFileType,
     overwrite: bool,
     package_id: Option<String>,
+    token: &Arc<AtomicBool>,
 ) -> Result<InstallResponse, AppError> {
     let extracted_path = archive_path
         .parent()
         .unwrap_or(archive_path)
         .join("extracted");
+
+    check_canceled(
+        token,
+        "The install was canceled before extraction started.",
+    )?;
 
     emit_progress(
         app,
@@ -1629,7 +1921,14 @@ fn finalize_archive_download(
         false,
     );
 
-    extract_archive(archive_path, &extracted_path, file_type)?;
+    extract_archive(archive_path, &extracted_path, file_type, &|| {
+        token.load(Ordering::SeqCst)
+    })?;
+
+    check_canceled(
+        token,
+        "The install was canceled after extraction completed.",
+    )?;
 
     emit_progress(
         app,
@@ -1641,10 +1940,22 @@ fn finalize_archive_download(
         false,
     );
 
+    check_canceled(
+        token,
+        "The install was canceled while inspecting the package.",
+    )?;
+
     if let Ok(layout) = detect_archive_layout(&extracted_path, plugin, &SupportedPlatform::current())
     {
         if let ArchiveLayout::StandaloneTool { source_root } = &layout {
-            return finalize_standalone_tool_install(app, plugin, source_root, overwrite, package_id);
+            return finalize_standalone_tool_install(
+                app,
+                plugin,
+                source_root,
+                overwrite,
+                package_id,
+                token,
+            );
         }
 
         let resolved_obs = match resolved_obs_location(app, plugin) {
@@ -1661,8 +1972,14 @@ fn finalize_archive_download(
             &resolved_obs.install_target_label,
             overwrite,
             package_id,
+            token,
         );
     }
+
+    check_canceled(
+        token,
+        "The install was canceled while inspecting the package.",
+    )?;
 
     let planned = inspect_archive_install(&extracted_path, plugin, &SupportedPlatform::current())?;
 
@@ -1686,6 +2003,7 @@ fn finalize_archive_download(
                 &resolved_obs.install_target_label,
                 overwrite,
                 package_id,
+                token,
             )
         }
         PlannedArchiveKind::StandaloneTool => {
@@ -1700,6 +2018,7 @@ fn finalize_archive_download(
                 &install_root,
                 overwrite,
                 package_id,
+                token,
             )
         }
         PlannedArchiveKind::Review => Ok(review_response(
@@ -1719,9 +2038,10 @@ fn finalize_obs_archive_install(
     install_label: &str,
     overwrite: bool,
     package_id: Option<String>,
+    token: &Arc<AtomicBool>,
 ) -> Result<InstallResponse, AppError> {
     let entries = collect_copy_entries(&operations, install_root)?;
-    let tracked_files = match copy_entries(app, plugin, &entries, overwrite, install_label) {
+    let tracked_files = match copy_entries(app, plugin, &entries, overwrite, install_label, token) {
         Ok(tracked_files) => tracked_files,
         Err(response) => return Ok(response),
     };
@@ -1762,6 +2082,8 @@ fn finalize_obs_archive_install(
         installed_plugin: Some(installed_plugin),
         manual_installer_path: None,
         download_path: None,
+        installer_started: false,
+        can_open_installer_manually: false,
         requires_restart: true,
         conflicts: None,
         review_plan: None,
@@ -1777,6 +2099,7 @@ fn finalize_standalone_tool_install(
     source_root: &Path,
     overwrite: bool,
     package_id: Option<String>,
+    token: &Arc<AtomicBool>,
 ) -> Result<InstallResponse, AppError> {
     let install_root = ensure_managed_tools_directory(app)?.join(&plugin.module_name);
     let operations = build_install_operations(
@@ -1793,6 +2116,7 @@ fn finalize_standalone_tool_install(
         &install_root,
         overwrite,
         package_id,
+        token,
     )
 }
 
@@ -1803,6 +2127,7 @@ fn finalize_standalone_operations_install(
     install_root: &Path,
     overwrite: bool,
     package_id: Option<String>,
+    token: &Arc<AtomicBool>,
 ) -> Result<InstallResponse, AppError> {
     let entries = collect_copy_entries(&operations, install_root)?;
     let tracked_files = match copy_entries(
@@ -1811,6 +2136,7 @@ fn finalize_standalone_operations_install(
         &entries,
         overwrite,
         "the managed desktop tools folder",
+        token,
     ) {
         Ok(tracked_files) => tracked_files,
         Err(response) => return Ok(response),
@@ -1858,6 +2184,8 @@ fn finalize_standalone_operations_install(
         installed_plugin: Some(installed_plugin),
         manual_installer_path: None,
         download_path: Some(install_root.display().to_string()),
+        installer_started: false,
+        can_open_installer_manually: false,
         requires_restart: false,
         conflicts: None,
         review_plan: None,
@@ -1873,6 +2201,7 @@ fn install_script_file(
     downloaded_file: &Path,
     filename: &str,
     overwrite: bool,
+    token: &Arc<AtomicBool>,
 ) -> Result<InstallResponse, AppError> {
     let resolved_obs = match resolved_obs_location(app, plugin) {
         Ok(resolved_obs) => resolved_obs,
@@ -1898,6 +2227,7 @@ fn install_script_file(
         }],
         overwrite,
         "your managed OBS scripts library",
+        token,
     ) {
         Ok(tracked_files) => tracked_files,
         Err(response) => return Ok(response),
@@ -1945,6 +2275,8 @@ fn install_script_file(
         installed_plugin: Some(installed_plugin),
         manual_installer_path: None,
         download_path: Some(target_path.display().to_string()),
+        installer_started: false,
+        can_open_installer_manually: false,
         requires_restart: false,
         conflicts: None,
         review_plan: None,
@@ -1958,6 +2290,7 @@ fn install_external_package(
     app: &AppHandle,
     plugin: &PluginCatalogEntry,
     package: &PluginPackage,
+    token: &Arc<AtomicBool>,
 ) -> Result<InstallResponse, AppError> {
     emit_progress(
         app,
@@ -1975,7 +2308,8 @@ fn install_external_package(
         &format!("{}-{}", plugin.id, plugin.version),
     ));
 
-    download_file(app, plugin, package, &download_path)?;
+    download_file(app, plugin, package, &download_path, token)?;
+    cancel_before_opening_download(token, &download_path)?;
     finalize_external_download(
         app,
         plugin,
@@ -1991,6 +2325,7 @@ fn install_archive_package(
     plugin: &PluginCatalogEntry,
     package: &PluginPackage,
     overwrite: bool,
+    token: &Arc<AtomicBool>,
 ) -> Result<InstallResponse, AppError> {
     emit_progress(
         app,
@@ -2010,7 +2345,7 @@ fn install_archive_package(
         filename_from_url(&package.download_url, &format!("{}-package", plugin.id));
     let archive_path = working_dir.path().join(archive_filename);
 
-    download_file(app, plugin, package, &archive_path)?;
+    download_file(app, plugin, package, &archive_path, token)?;
 
     finalize_archive_download(
         app,
@@ -2019,6 +2354,7 @@ fn install_archive_package(
         &package.file_type,
         overwrite,
         Some(package.id.clone()),
+        token,
     )
 }
 
@@ -2027,6 +2363,7 @@ fn install_github_release_asset(
     plugin: &PluginCatalogEntry,
     selection: GitHubInstallSelection,
     overwrite: bool,
+    token: &Arc<AtomicBool>,
 ) -> Result<InstallResponse, AppError> {
     emit_progress(
         app,
@@ -2048,7 +2385,7 @@ fn install_github_release_asset(
                 .prefix(&format!("obs-plugin-installer-{}-", plugin.id))
                 .tempdir_in(temp_root)?;
             let archive_path = working_dir.path().join(&selection.asset.name);
-            download_url(app, plugin, &selection.asset.download_url, &archive_path)?;
+            download_url(app, plugin, &selection.asset.download_url, &archive_path, token)?;
             finalize_archive_download(
                 app,
                 plugin,
@@ -2056,12 +2393,14 @@ fn install_github_release_asset(
                 &selection.asset.file_type,
                 overwrite,
                 None,
+                token,
             )?
         }
         PluginPackageInstallType::External => {
             let downloads_dir = ensure_download_directory(app)?;
             let download_path = downloads_dir.join(&selection.asset.name);
-            download_url(app, plugin, &selection.asset.download_url, &download_path)?;
+            download_url(app, plugin, &selection.asset.download_url, &download_path, token)?;
+            cancel_before_opening_download(token, &download_path)?;
             let (label, _, _) = external_install_guidance(Some(&selection.asset.file_type));
             finalize_external_download(
                 app,
@@ -2096,6 +2435,7 @@ fn install_resource_import(
     app: &AppHandle,
     plugin: &PluginCatalogEntry,
     overwrite: bool,
+    token: &Arc<AtomicBool>,
 ) -> Result<InstallResponse, AppError> {
     let resource_urls = resource_candidate_urls(plugin);
     if resource_urls.is_empty() {
@@ -2126,6 +2466,10 @@ fn install_resource_import(
     let mut last_error = None;
 
     for resource_url in resource_urls {
+        check_canceled(
+            token,
+            "The install was canceled while resolving the official download source.",
+        )?;
         match resolve_resource_download(&client, &resource_url, &fallback_filename) {
             Ok(result) => {
                 resolved_download = Some(result);
@@ -2159,7 +2503,15 @@ fn install_resource_import(
         ResolvedResourceKind::External => {
             let downloads_dir = ensure_download_directory(app)?;
             let download_path = downloads_dir.join(&filename);
-            write_download_response(app, &plugin.id, &plugin.name, response, &download_path)?;
+            write_download_response(
+                app,
+                &plugin.id,
+                &plugin.name,
+                response,
+                &download_path,
+                token,
+            )?;
+            cancel_before_opening_download(token, &download_path)?;
             finalize_external_download(
                 app,
                 plugin,
@@ -2175,8 +2527,15 @@ fn install_resource_import(
                 .prefix(&format!("obs-plugin-installer-{}-", plugin.id))
                 .tempdir_in(temp_root)?;
             let archive_path = working_dir.path().join(&filename);
-            write_download_response(app, &plugin.id, &plugin.name, response, &archive_path)?;
-            finalize_archive_download(app, plugin, &archive_path, &file_type, overwrite, None)
+            write_download_response(
+                app,
+                &plugin.id,
+                &plugin.name,
+                response,
+                &archive_path,
+                token,
+            )?;
+            finalize_archive_download(app, plugin, &archive_path, &file_type, overwrite, None, token)
         }
         ResolvedResourceKind::Script => {
             let temp_root = app.path().temp_dir()?;
@@ -2184,8 +2543,15 @@ fn install_resource_import(
                 .prefix(&format!("obs-plugin-installer-{}-", plugin.id))
                 .tempdir_in(temp_root)?;
             let script_path = working_dir.path().join(&filename);
-            write_download_response(app, &plugin.id, &plugin.name, response, &script_path)?;
-            install_script_file(app, plugin, &script_path, &filename, overwrite)
+            write_download_response(
+                app,
+                &plugin.id,
+                &plugin.name,
+                response,
+                &script_path,
+                token,
+            )?;
+            install_script_file(app, plugin, &script_path, &filename, overwrite, token)
         }
     }
 }
@@ -2193,6 +2559,7 @@ fn install_resource_import(
 fn do_install_plugin(
     app: &AppHandle,
     request: InstallRequest,
+    token: &Arc<AtomicBool>,
 ) -> Result<InstallResponse, AppError> {
     let catalog = load_plugin_catalog()?;
     let Some(plugin) = catalog.iter().find(|plugin| plugin.id == request.plugin_id) else {
@@ -2216,6 +2583,7 @@ fn do_install_plugin(
                     plugin,
                     selection,
                     request.overwrite.unwrap_or(false),
+                    token,
                 );
             }
             Ok(GitHubSelectionResolution::Unavailable {
@@ -2261,7 +2629,7 @@ fn do_install_plugin(
     }
 
     if plugin.guide_only {
-        return install_resource_import(app, plugin, request.overwrite.unwrap_or(false));
+        return install_resource_import(app, plugin, request.overwrite.unwrap_or(false), token);
     }
 
     let platform = SupportedPlatform::current();
@@ -2277,6 +2645,8 @@ fn do_install_plugin(
             installed_plugin: None,
             manual_installer_path: None,
             download_path: None,
+            installer_started: false,
+            can_open_installer_manually: false,
             requires_restart: false,
             conflicts: None,
             review_plan: None,
@@ -2297,6 +2667,8 @@ fn do_install_plugin(
             installed_plugin: None,
             manual_installer_path: None,
             download_path: None,
+            installer_started: false,
+            can_open_installer_manually: false,
             requires_restart: false,
             conflicts: None,
             review_plan: None,
@@ -2304,9 +2676,15 @@ fn do_install_plugin(
             selected_asset_reason: None,
             github_release_url: None,
         }),
-        PluginPackageInstallType::External => install_external_package(app, plugin, package),
+        PluginPackageInstallType::External => install_external_package(app, plugin, package, token),
         PluginPackageInstallType::Archive => {
-            install_archive_package(app, plugin, package, request.overwrite.unwrap_or(false))
+            install_archive_package(
+                app,
+                plugin,
+                package,
+                request.overwrite.unwrap_or(false),
+                token,
+            )
         }
     }
 }
@@ -2314,12 +2692,45 @@ fn do_install_plugin(
 #[tauri::command]
 pub async fn install_plugin(
     app: AppHandle,
+    registry: tauri::State<'_, InstallCancellationRegistry>,
     request: InstallRequest,
 ) -> Result<InstallResponse, String> {
-    tauri::async_runtime::spawn_blocking(move || do_install_plugin(&app, request))
-        .await
-        .map_err(|error| error.to_string())?
-        .map_err(|error| error.to_string())
+    let plugin_id = request.plugin_id.clone();
+    let token = registry.begin(&plugin_id);
+    let app_for_task = app.clone();
+
+    let task_result = tauri::async_runtime::spawn_blocking(move || {
+        do_install_plugin(&app_for_task, request, &token)
+    })
+    .await
+    .map_err(|error| error.to_string());
+
+    registry.finish(&plugin_id);
+
+    match task_result {
+        Ok(Ok(response)) => Ok(response),
+        Ok(Err(error)) if error.is_canceled() => {
+            Ok(canceled_response(&plugin_id, error.to_string(), &app))
+        }
+        Ok(Err(error)) => Err(error.to_string()),
+        Err(error) => Err(error),
+    }
+}
+
+#[tauri::command]
+pub fn cancel_plugin_install(
+    registry: tauri::State<'_, InstallCancellationRegistry>,
+    plugin_id: String,
+) -> Result<CancelInstallResponse, String> {
+    let canceled = registry.cancel(&plugin_id);
+    Ok(CancelInstallResponse {
+        canceled,
+        message: if canceled {
+            "Cancellation requested. OBS Plugin Installer will stop this install safely.".to_string()
+        } else {
+            "No active install was found for that plugin.".to_string()
+        },
+    })
 }
 
 #[tauri::command]
@@ -2356,4 +2767,17 @@ pub fn reveal_path(path: String) -> Result<(), String> {
     } else {
         open::that(target).map_err(|error| error.to_string())
     }
+}
+
+#[tauri::command]
+pub fn open_local_path(path: String) -> Result<(), String> {
+    let target = PathBuf::from(path);
+    if !target.exists() {
+        return Err(format!(
+            "The local file could not be found at {}.",
+            target.display()
+        ));
+    }
+
+    open::that(target).map_err(|error| error.to_string())
 }

@@ -176,6 +176,36 @@ pub struct BootstrapPayload {
     pub plugins: Vec<PluginCatalogEntry>,
     pub installed_plugins: Vec<InstalledPluginRecord>,
     pub current_platform: String,
+    pub current_version: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppUpdateSnapshot {
+    pub status: String,
+    pub message: String,
+    pub current_version: String,
+    pub latest_version: Option<String>,
+    pub minimum_supported_version: Option<String>,
+    pub release_notes: Option<String>,
+    pub published_at: Option<String>,
+    pub update_channel: String,
+    pub release_tag: Option<String>,
+    pub release_url: Option<String>,
+    pub selected_asset_name: Option<String>,
+    pub selected_asset_reason: Option<String>,
+    pub selected_asset_url: Option<String>,
+    pub selected_asset_size: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppUpdateProgressEvent {
+    pub stage: String,
+    pub downloaded_bytes: u64,
+    pub total_bytes: Option<u64>,
+    pub progress_percent: Option<f64>,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -197,6 +227,10 @@ pub struct InstallResponse {
     pub installed_plugin: Option<InstalledPluginRecord>,
     pub manual_installer_path: Option<String>,
     pub download_path: Option<String>,
+    #[serde(default)]
+    pub installer_started: bool,
+    #[serde(default)]
+    pub can_open_installer_manually: bool,
     pub requires_restart: bool,
     pub conflicts: Option<Vec<String>>,
     pub review_plan: Option<InstallReviewPlan>,
@@ -214,6 +248,13 @@ pub struct InstallProgressEvent {
     pub message: String,
     pub detail: Option<String>,
     pub terminal: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CancelInstallResponse {
+    pub canceled: bool,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

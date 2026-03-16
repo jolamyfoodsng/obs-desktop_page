@@ -4,6 +4,7 @@ import { ExternalLink, FolderOpen, RefreshCw, ShieldCheck, Trash2 } from 'lucide
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
+import { CopyPathField } from '../components/ui/CopyPathField'
 import {
   formatDisplayDate,
   getPluginCompatibility,
@@ -139,9 +140,9 @@ export function InstalledPage() {
                               ) : null}
                             </div>
                             <div className="flex flex-wrap gap-2">
-                              {isScriptEntry ? <Badge tone="warning">Script Plugin</Badge> : null}
+                              {isScriptEntry ? <Badge tone="script">OBS Script</Badge> : null}
                               {isStandaloneTool ? (
-                                <Badge tone="primary">Standalone Tool</Badge>
+                                <Badge tone="neutral">Standalone Tool</Badge>
                               ) : null}
                             </div>
                             <p className="text-sm text-slate-400">{plugin.tagline}</p>
@@ -152,9 +153,11 @@ export function InstalledPage() {
                                 : 'Detected in OBS folders on this device'}
                             </p>
                             {isScriptEntry && installedPlugin.downloadPath ? (
-                              <p className="break-all font-mono text-[11px] leading-5 text-primary/80">
-                                {installedPlugin.downloadPath}
-                              </p>
+                              <CopyPathField
+                                buttonClassName="h-7 w-7"
+                                codeClassName="rounded-md px-2 py-1 text-[11px] leading-5"
+                                value={installedPlugin.downloadPath}
+                              />
                             ) : null}
                             {developerMode ? (
                               <p className="break-all text-[11px] leading-5 text-slate-500">
@@ -179,7 +182,7 @@ export function InstalledPage() {
                           ) : hasUpdate ? (
                             <Badge tone="warning">Update available</Badge>
                           ) : isStandaloneTool ? (
-                            <Badge tone="primary">Tool installed</Badge>
+                            <Badge tone="neutral">Tool installed</Badge>
                           ) : (
                             <Badge tone="success">Installed (managed)</Badge>
                           )}

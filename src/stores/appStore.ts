@@ -1,9 +1,13 @@
 import { create } from 'zustand'
+import { coerce, lt } from 'semver'
 import { toast } from 'sonner'
 
 import { getErrorMessage } from '../lib/errors'
 import { desktopApi } from '../lib/tauri'
 import type {
+  AppUpdateProgressEvent,
+  AppUpdateSnapshot,
+  AppUpdateStatus,
   AppSettings,
   BootstrapPayload,
   InstallProgressEvent,
@@ -15,6 +19,8 @@ import type {
 type CatalogViewMode = 'list' | 'grid'
 
 const CATALOG_VIEW_MODE_STORAGE_KEY = 'obs-plugin-installer.catalog-view-mode'
+const DISMISSED_APP_UPDATE_STORAGE_KEY =
+  'obs-plugin-installer.dismissed-app-update-version'
 
 function readCatalogViewMode(): CatalogViewMode {
   if (typeof window === 'undefined') {
@@ -25,6 +31,54 @@ function readCatalogViewMode(): CatalogViewMode {
   return stored === 'grid' ? 'grid' : 'list'
 }
 
+function readDismissedAppUpdateVersion() {
+  if (typeof window === 'undefined') {
+    return null
+  }
+
+  return window.localStorage.getItem(DISMISSED_APP_UPDATE_STORAGE_KEY)
+}
+
+function writeDismissedAppUpdateVersion(version: string | null) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  if (version) {
+    window.localStorage.setItem(DISMISSED_APP_UPDATE_STORAGE_KEY, version)
+  } else {
+    window.localStorage.removeItem(DISMISSED_APP_UPDATE_STORAGE_KEY)
+  }
+}
+
+function normalizeVersion(version?: string | null) {
+  return version ? coerce(version)?.version ?? null : null
+}
+
+function classifyAppUpdate(snapshot: AppUpdateSnapshot): AppUpdateStatus {
+  if (snapshot.status === 'disabled' || snapshot.status === 'failed' || snapshot.status === 'ready-to-restart') {
+    return snapshot.status
+  }
+
+  const currentVersion = normalizeVersion(snapshot.currentVersion)
+  const latestVersion = normalizeVersion(snapshot.latestVersion ?? null)
+  const minimumSupportedVersion = normalizeVersion(snapshot.minimumSupportedVersion ?? null)
+
+  if (!currentVersion || !latestVersion) {
+    return snapshot.status
+  }
+
+  if (minimumSupportedVersion && lt(currentVersion, minimumSupportedVersion)) {
+    return 'update-required'
+  }
+
+  if (lt(currentVersion, latestVersion)) {
+    return 'update-available'
+  }
+
+  return 'no-update'
+}
+
 interface AppStoreState {
   bootstrap: BootstrapPayload | null
   bootError: string | null
@@ -33,12 +87,23 @@ interface AppStoreState {
   isSettingsWorking: boolean
   uninstallingPluginId: string | null
   adoptingPluginId: string | null
+  cancelingInstallPluginId: string | null
   searchQuery: string
   selectedCategory: string
   catalogViewMode: CatalogViewMode
+  appUpdate: AppUpdateSnapshot | null
+  appUpdateStatus: AppUpdateStatus
+  appUpdateProgress: AppUpdateProgressEvent | null
+  isCheckingAppUpdate: boolean
+  isApplyingAppUpdate: boolean
+  dismissedAppUpdateVersion: string | null
   installProgress: InstallProgressEvent | null
   lastInstallResponse: InstallResponse | null
   loadApp: () => Promise<void>
+  checkForAppUpdate: (options?: { silent?: boolean; forcePrompt?: boolean }) => Promise<AppUpdateSnapshot | undefined>
+  downloadAppUpdate: () => Promise<AppUpdateSnapshot | undefined>
+  installAppUpdate: () => Promise<void>
+  dismissAppUpdate: () => void
   applyDetection: (detection: ObsDetectionState) => void
   detectObs: () => Promise<void>
   chooseObsDirectory: () => Promise<void>
@@ -56,15 +121,18 @@ interface AppStoreState {
       githubAssetUrl?: string | null
     },
   ) => Promise<InstallResponse | undefined>
+  cancelInstall: (pluginId: string) => Promise<void>
   adoptInstallation: (pluginId: string) => Promise<void>
   uninstallPlugin: (pluginId: string) => Promise<UninstallResponse | undefined>
   openExternal: (url: string) => Promise<void>
+  openLocalPath: (path: string) => Promise<void>
   revealPath: (path: string) => Promise<void>
   setSearchQuery: (query: string) => void
   setSelectedCategory: (category: string) => void
   setCatalogViewMode: (mode: CatalogViewMode) => void
   clearInstallProgress: () => void
   handleInstallProgress: (progress: InstallProgressEvent) => void
+  handleAppUpdateProgress: (progress: AppUpdateProgressEvent) => void
 }
 
 let bootstrapRequest: Promise<void> | null = null
@@ -77,9 +145,16 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   isSettingsWorking: false,
   uninstallingPluginId: null,
   adoptingPluginId: null,
+  cancelingInstallPluginId: null,
   searchQuery: '',
   selectedCategory: 'Compatible',
   catalogViewMode: readCatalogViewMode(),
+  appUpdate: null,
+  appUpdateStatus: 'idle',
+  appUpdateProgress: null,
+  isCheckingAppUpdate: false,
+  isApplyingAppUpdate: false,
+  dismissedAppUpdateVersion: readDismissedAppUpdateVersion(),
   installProgress: null,
   lastInstallResponse: null,
 
@@ -104,6 +179,148 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     })()
 
     return bootstrapRequest
+  },
+
+  async checkForAppUpdate(options) {
+    set({
+      appUpdateStatus: 'checking',
+      appUpdateProgress: null,
+      isCheckingAppUpdate: true,
+    })
+
+    try {
+      const snapshot = await desktopApi.checkAppUpdate()
+      const nextStatus = classifyAppUpdate(snapshot)
+
+      if (options?.forcePrompt && snapshot.latestVersion) {
+        writeDismissedAppUpdateVersion(null)
+      }
+
+      set((state) => ({
+        appUpdate: snapshot,
+        appUpdateStatus: nextStatus,
+        appUpdateProgress: null,
+        isCheckingAppUpdate: false,
+        dismissedAppUpdateVersion: options?.forcePrompt
+          ? null
+          : state.dismissedAppUpdateVersion,
+      }))
+
+      if (!options?.silent) {
+        if (nextStatus === 'no-update') {
+          toast.success('You are already on the latest desktop app build.')
+        } else if (nextStatus === 'disabled') {
+          toast(snapshot.message)
+        } else if (nextStatus === 'failed') {
+          toast.error(snapshot.message)
+        }
+      }
+
+      return snapshot
+    } catch (error) {
+      const message = getErrorMessage(error, 'Could not check for app updates.')
+      set((state) => ({
+        appUpdate: state.appUpdate
+          ? {
+              ...state.appUpdate,
+              status: 'failed',
+              message,
+            }
+          : {
+              status: 'failed',
+              message,
+              currentVersion: state.bootstrap?.currentVersion ?? '0.0.0',
+              latestVersion: null,
+              minimumSupportedVersion: null,
+              releaseNotes: null,
+              publishedAt: null,
+              updateChannel: state.bootstrap?.settings.betaUpdates ? 'beta' : 'stable',
+              releaseTag: null,
+              releaseUrl: null,
+              selectedAssetName: null,
+              selectedAssetReason: null,
+              selectedAssetUrl: null,
+              selectedAssetSize: null,
+            },
+        appUpdateStatus: 'failed',
+        appUpdateProgress: null,
+        isCheckingAppUpdate: false,
+      }))
+
+      if (!options?.silent) {
+        toast.error(message)
+      }
+
+      return undefined
+    }
+  },
+
+  async downloadAppUpdate() {
+    const currentUpdate = get().appUpdate
+    if (!currentUpdate) {
+      return undefined
+    }
+
+    set({
+      appUpdateStatus: 'downloading',
+      appUpdateProgress: null,
+    })
+
+    try {
+      const snapshot = await desktopApi.downloadAppUpdate()
+      const nextStatus = classifyAppUpdate(snapshot)
+      set({
+        appUpdate: snapshot,
+        appUpdateStatus: nextStatus,
+        appUpdateProgress: null,
+      })
+      return snapshot
+    } catch (error) {
+      const message = getErrorMessage(error, 'Could not download the app update.')
+      set({
+        appUpdate: {
+          ...currentUpdate,
+          status: 'failed',
+          message,
+        },
+        appUpdateStatus: 'failed',
+      })
+      toast.error(message)
+      return undefined
+    }
+  },
+
+  async installAppUpdate() {
+    set({ isApplyingAppUpdate: true })
+
+    try {
+      await desktopApi.installAppUpdate()
+    } catch (error) {
+      const message = getErrorMessage(error, 'Could not finish installing the app update.')
+      set((state) => ({
+        isApplyingAppUpdate: false,
+        appUpdate: state.appUpdate
+          ? {
+              ...state.appUpdate,
+              status: 'failed',
+              message,
+            }
+          : state.appUpdate,
+        appUpdateStatus: 'failed',
+      }))
+      toast.error(message)
+      return
+    }
+
+    set({ isApplyingAppUpdate: false })
+  },
+
+  dismissAppUpdate() {
+    const latestVersion = get().appUpdate?.latestVersion ?? null
+    writeDismissedAppUpdateVersion(latestVersion)
+    set({
+      dismissedAppUpdateVersion: latestVersion,
+    })
   },
 
   applyDetection(detection) {
@@ -266,10 +483,16 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
         searchQuery: '',
         selectedCategory: 'Compatible',
         catalogViewMode: 'list',
+        appUpdate: null,
+        appUpdateStatus: 'idle',
+        appUpdateProgress: null,
+        dismissedAppUpdateVersion: null,
         installProgress: null,
         lastInstallResponse: null,
+        cancelingInstallPluginId: null,
       })
       window.localStorage.setItem(CATALOG_VIEW_MODE_STORAGE_KEY, 'list')
+      writeDismissedAppUpdateVersion(null)
       toast.success(response.message)
       await get().loadApp()
     } catch (error) {
@@ -282,12 +505,13 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     set({
       installProgress: {
         pluginId,
-        stage: 'downloading',
+        stage: 'preparing',
         progress: 4,
         message: 'Preparing installation',
         detail: 'Starting plugin install workflow.',
       },
       lastInstallResponse: null,
+      cancelingInstallPluginId: null,
     })
 
     try {
@@ -302,6 +526,12 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
       set({ lastInstallResponse: response })
 
       if (!response.success) {
+        if (response.code === 'CANCELED') {
+          set({ cancelingInstallPluginId: null })
+          await get().loadApp()
+          return response
+        }
+
         if (response.code === 'MANUAL_ONLY') {
           const plugin = get().bootstrap?.plugins.find((entry) => entry.id === pluginId)
           if (plugin) {
@@ -332,18 +562,22 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
         return response
       }
 
-      if (response.manualInstallerPath) {
+      if (response.installerStarted) {
         toast.success(response.message)
+      } else if (response.manualInstallerPath) {
+        toast(response.message)
       } else if (response.installedPlugin) {
         toast.success(response.message)
       }
 
       await get().loadApp()
+      set({ cancelingInstallPluginId: null })
       return response
     } catch (error) {
       const message = getErrorMessage(error, 'Unexpected plugin install failure.')
 
       set({
+        cancelingInstallPluginId: null,
         installProgress: {
           pluginId,
           stage: 'error',
@@ -355,6 +589,21 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
       })
       toast.error(message)
       return undefined
+    }
+  },
+
+  async cancelInstall(pluginId) {
+    set({ cancelingInstallPluginId: pluginId })
+
+    try {
+      const response = await desktopApi.cancelPluginInstall(pluginId)
+      if (!response.canceled) {
+        set({ cancelingInstallPluginId: null })
+        toast.error(response.message)
+      }
+    } catch (error) {
+      set({ cancelingInstallPluginId: null })
+      toast.error(getErrorMessage(error, 'Could not stop the install safely.'))
     }
   },
 
@@ -396,6 +645,14 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     }
   },
 
+  async openLocalPath(path) {
+    try {
+      await desktopApi.openLocalPath(path)
+    } catch (error) {
+      toast.error(getErrorMessage(error, 'Could not open the downloaded installer file.'))
+    }
+  },
+
   async revealPath(path) {
     try {
       await desktopApi.revealPath(path)
@@ -418,10 +675,24 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   },
 
   clearInstallProgress() {
-    set({ installProgress: null, lastInstallResponse: null })
+    set({
+      installProgress: null,
+      lastInstallResponse: null,
+      cancelingInstallPluginId: null,
+    })
   },
 
   handleInstallProgress(progress) {
-    set({ installProgress: progress })
+    set({
+      installProgress: progress,
+      cancelingInstallPluginId: progress.terminal ? null : get().cancelingInstallPluginId,
+    })
+  },
+
+  handleAppUpdateProgress(progress) {
+    set({
+      appUpdateProgress: progress,
+      appUpdateStatus: progress.stage === 'finished' ? 'ready-to-restart' : 'downloading',
+    })
   },
 }))

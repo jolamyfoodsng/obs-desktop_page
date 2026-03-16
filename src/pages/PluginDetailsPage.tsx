@@ -10,6 +10,7 @@ import { useParams } from 'react-router-dom'
 
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
+import { CopyPathField } from '../components/ui/CopyPathField'
 import { getErrorMessage } from '../lib/errors'
 import { PluginGlyph } from '../lib/pluginVisuals'
 import { desktopApi } from '../lib/tauri'
@@ -21,6 +22,7 @@ import {
   getGitHubRepoUrl,
   getPlatformPackages,
   getPluginCompatibility,
+  getPluginTypeLabel,
   getRecommendedPackage,
   hasGitHubReleaseSource,
   isScriptPlugin,
@@ -124,6 +126,7 @@ export function PluginDetailsPage() {
     githubRelease?.selectedAsset ??
     null
   const isScriptEntry = isScriptPlugin(plugin, installedPlugin, selectedGitHubAsset?.name)
+  const pluginTypeLabel = getPluginTypeLabel(plugin, installedPlugin, selectedGitHubAsset?.name)
   const pluginState = getCatalogPluginState(plugin, installedPlugin)
   const compatibility = getPluginCompatibility(plugin, currentPlatform, {
     releaseInfo: githubRelease,
@@ -184,11 +187,12 @@ export function PluginDetailsPage() {
                     {plugin.author} • v{plugin.version}
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <Badge tone="neutral">{plugin.category}</Badge>
+                    <Badge tone={pluginTypeLabel === 'OBS Script' ? 'script' : 'neutral'}>
+                      {pluginTypeLabel === 'OBS Script' ? 'OBS Script' : plugin.category}
+                    </Badge>
                     <Badge tone={compatibility.tone}>{compatibility.label}</Badge>
-                    {isScriptEntry ? <Badge tone="warning">Script Plugin</Badge> : null}
                     {plugin.verified ? (
-                      <Badge tone="primary">
+                      <Badge tone="verified">
                         <ShieldCheck className="size-3.5" />
                         Verified
                       </Badge>
@@ -263,9 +267,10 @@ export function PluginDetailsPage() {
                       <strong>+</strong>, and select the installed file.
                     </p>
                     {installedPlugin?.downloadPath ? (
-                      <p className="mt-2 break-all rounded-md border border-white/10 bg-white/[0.03] px-3 py-2 font-mono text-xs text-slate-300">
-                        {installedPlugin.downloadPath}
-                      </p>
+                      <CopyPathField
+                        className="mt-2"
+                        value={installedPlugin.downloadPath}
+                      />
                     ) : null}
                   </div>
                 ) : null}
@@ -320,7 +325,7 @@ export function PluginDetailsPage() {
               <div className="flex items-center justify-between gap-4">
                 <dt className="text-slate-500">Type</dt>
                 <dd className="text-right text-slate-300">
-                  {isScriptEntry ? 'OBS Script' : 'OBS Plugin'}
+                  {pluginTypeLabel}
                 </dd>
               </div>
               <div className="flex items-center justify-between gap-4">

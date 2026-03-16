@@ -16,6 +16,8 @@ pub enum AppError {
     Zip(#[from] zip::result::ZipError),
     #[error("Path resolution failed")]
     TauriPath(#[from] tauri::Error),
+    #[error("{message}")]
+    Canceled { message: String },
 }
 
 impl AppError {
@@ -30,5 +32,15 @@ impl AppError {
             path.display(),
             reason.into()
         ))
+    }
+
+    pub fn canceled(message: impl Into<String>) -> Self {
+        Self::Canceled {
+            message: message.into(),
+        }
+    }
+
+    pub fn is_canceled(&self) -> bool {
+        matches!(self, Self::Canceled { .. })
     }
 }

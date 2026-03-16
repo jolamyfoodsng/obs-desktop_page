@@ -61,10 +61,18 @@ export function platformLabel(platform: string) {
 
 export function formatSupportedPlatforms(platforms: string[]) {
   if (platforms.length === 0) {
-    return 'Not specified'
+    return 'Platform info unavailable'
   }
 
   return platforms.map(platformLabel).join(', ')
+}
+
+export function getPluginTypeLabel(
+  plugin?: PluginCatalogEntry | null,
+  installedPlugin?: Pick<InstalledPluginRecord, 'sourceType'> | null,
+  assetName?: string | null,
+) {
+  return isScriptPlugin(plugin, installedPlugin, assetName) ? 'OBS Script' : 'OBS Plugin'
 }
 
 export function normalizePlatform(platform: string): SupportedPlatform {
@@ -267,7 +275,7 @@ export function getPluginCompatibility(
   if (!metadataSupportsPlatform) {
     return {
       label: unsupportedActionLabel(plugin, normalizedPlatform),
-      tone: 'danger',
+      tone: 'warning',
       canInstall: false,
       isGuided: false,
       reason: `${plugin.name} does not advertise ${platformLabel(normalizedPlatform)} support in the catalog metadata.`,
@@ -314,8 +322,8 @@ export function getPluginCompatibility(
 
   if (hasRuntimeStrategy) {
     return {
-      label: isScriptPlugin(plugin) ? 'OBS script install' : 'Managed resource import',
-      tone: plugin.guideOnly ? 'warning' : 'primary',
+      label: isScriptPlugin(plugin) ? 'OBS Script' : 'Managed resource import',
+      tone: plugin.guideOnly ? 'warning' : 'neutral',
       canInstall: true,
       isGuided: plugin.guideOnly,
       reason: isScriptPlugin(plugin)
@@ -331,7 +339,7 @@ export function getPluginCompatibility(
     if (options?.releaseInfo) {
       return {
         label: unsupportedActionLabel(plugin, normalizedPlatform),
-        tone: 'danger',
+        tone: 'warning',
         canInstall: false,
         isGuided: false,
         reason: `The latest release does not expose an installable ${platformLabel(normalizedPlatform)} asset.`,
@@ -355,7 +363,7 @@ export function getPluginCompatibility(
 
   return {
     label: unsupportedActionLabel(plugin, normalizedPlatform),
-    tone: 'danger',
+    tone: 'warning',
     canInstall: false,
     isGuided: false,
     reason: `No ${platformLabel(normalizedPlatform)} package or install strategy is available for this resource.`,

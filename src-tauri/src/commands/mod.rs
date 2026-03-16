@@ -5,4 +5,5 @@ pub mod plugin_paths;
 pub mod settings;
 pub mod state;
 pub mod store;
+pub mod update;
 pub mod validate_obs;

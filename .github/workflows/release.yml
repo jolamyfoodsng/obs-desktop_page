@@ -20,14 +20,17 @@ jobs:
             label: Windows
             platform: windows
             bundles: nsis,msi
+            default_update_bundle: nsis
           - os: ubuntu-latest
             label: Linux
             platform: linux
             bundles: appimage,deb
+            default_update_bundle: appimage
           - os: macos-latest
             label: macOS
             platform: macos
             bundles: dmg
+            default_update_bundle: app
 
     steps:
       - name: Check out source
@@ -73,6 +76,12 @@ jobs:
 
       - name: Build Tauri release bundles
         run: npm run build:release -- --bundles ${{ matrix.bundles }}
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_UPDATE_BASE_URL: ${{ vars.TAURI_UPDATE_BASE_URL }}
+          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+          TAURI_UPDATE_BUNDLE_TYPE: ${{ matrix.default_update_bundle }}
 
       - name: Upload release artifacts
         if: github.event_name == 'release'
@@ -85,4 +94,7 @@ jobs:
             src-tauri/target/release/bundle/**/*.msi
             src-tauri/target/release/bundle/**/*.AppImage
             src-tauri/target/release/bundle/**/*.deb
+            src-tauri/target/release/bundle/**/*.rpm
+            src-tauri/target/release/bundle/**/*.app.tar.gz
             src-tauri/target/release/bundle/**/*.dmg
+            src-tauri/target/release/bundle/**/*.sig

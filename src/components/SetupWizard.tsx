@@ -7,6 +7,7 @@ import {
 
 import type { ObsDetectionState } from '../types/desktop'
 import { Button } from './ui/Button'
+import { CopyPathField } from './ui/CopyPathField'
 
 interface SetupWizardProps {
   detection: ObsDetectionState
@@ -70,18 +71,29 @@ export function SetupWizard({
                   <h2 className="text-xl font-semibold text-white">
                     {currentPath ? 'OBS detected at' : 'No OBS path saved yet'}
                   </h2>
-                  <p className="mt-2 break-all rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 font-mono text-sm text-primary">
-                    {currentPath ?? 'Automatic detection did not find a valid obs-studio folder yet.'}
-                  </p>
+                  {currentPath ? (
+                    <CopyPathField
+                      className="mt-2"
+                      codeClassName="rounded-lg px-4 py-3 text-sm"
+                      value={currentPath}
+                    />
+                  ) : (
+                    <p className="ui-code-block mt-2 break-all rounded-lg px-4 py-3 text-sm">
+                      Automatic detection did not find a valid obs-studio folder yet.
+                    </p>
+                  )}
                   <p className="mt-3 text-sm leading-6 text-slate-400">{detection.message}</p>
                   {detection.installTargetPath ? (
                     <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3">
                       <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
                         Install target
                       </p>
-                      <p className="mt-2 break-all text-sm text-slate-300">
-                        {detection.installTargetLabel}: {detection.installTargetPath}
-                      </p>
+                      <CopyPathField
+                        className="mt-2"
+                        codeClassName="rounded-md bg-transparent px-0 py-0 text-sm text-slate-300"
+                        displayValue={`${detection.installTargetLabel}: ${detection.installTargetPath}`}
+                        value={detection.installTargetPath}
+                      />
                     </div>
                   ) : null}
                 </div>

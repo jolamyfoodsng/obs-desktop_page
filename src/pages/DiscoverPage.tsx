@@ -139,7 +139,7 @@ export function DiscoverPage() {
                 className={[
                   'rounded-lg border px-3 py-1.5 text-[12px] font-medium transition-colors',
                   selectedCategory === category
-                    ? 'border-primary/30 bg-primary/12 text-white'
+                    ? 'border-primary bg-primary text-on-accent'
                     : 'border-white/10 bg-white/[0.03] text-slate-400 hover:bg-white/[0.06] hover:text-white',
                 ].join(' ')}
                 key={category}
@@ -147,7 +147,14 @@ export function DiscoverPage() {
                 type="button"
               >
                 {category}
-                <span className="ml-2 text-slate-500">{categoryCounts.get(category) ?? 0}</span>
+                <span
+                  className={[
+                    'ml-2',
+                    selectedCategory === category ? 'text-on-accent' : 'text-slate-500',
+                  ].join(' ')}
+                >
+                  {categoryCounts.get(category) ?? 0}
+                </span>
               </button>
             ))}
           </div>
@@ -158,7 +165,7 @@ export function DiscoverPage() {
                 className={[
                   'rounded-md px-3 py-1.5 text-[12px] font-medium transition-colors',
                   catalogViewMode === mode
-                    ? 'bg-primary/12 text-white'
+                    ? 'bg-primary text-on-accent'
                     : 'text-slate-400 hover:text-white',
                 ].join(' ')}
                 key={mode}

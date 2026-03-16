@@ -1,8 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { HashRouter, Route, Routes } from 'react-router-dom'
 import { AlertTriangle, LoaderCircle, RotateCcw } from 'lucide-react'
+import { coerce, lt } from 'semver'
 import { Toaster } from 'sonner'
 
+import { AppUpdateDialog } from './components/AppUpdateDialog'
+import { RequiredUpdateScreen } from './components/RequiredUpdateScreen'
 import { SetupWizard } from './components/SetupWizard'
 import { AppShell } from './components/layout/AppShell'
 import { Button } from './components/ui/Button'
@@ -13,7 +16,7 @@ import { PluginDetailsPage } from './pages/PluginDetailsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { UpdatesPage } from './pages/UpdatesPage'
 import { useAppStore } from './stores/appStore'
-import type { AccentColor, ThemeMode } from './types/desktop'
+import type { AccentColor, AppUpdateSnapshot, ThemeMode } from './types/desktop'
 
 const accentColorMap: Record<AccentColor, string> = {
   purple: '78 121 255',
@@ -50,6 +53,21 @@ function LoadingScreen() {
       </div>
     </div>
   )
+}
+
+function isRequiredUpdate(snapshot: AppUpdateSnapshot | null) {
+  if (!snapshot?.minimumSupportedVersion) {
+    return false
+  }
+
+  const currentVersion = coerce(snapshot.currentVersion)?.version
+  const minimumSupportedVersion = coerce(snapshot.minimumSupportedVersion)?.version
+
+  if (!currentVersion || !minimumSupportedVersion) {
+    return false
+  }
+
+  return lt(currentVersion, minimumSupportedVersion)
 }
 
 function StartupErrorScreen({
@@ -101,13 +119,27 @@ function App() {
   const isBootstrapping = useAppStore((state) => state.isBootstrapping)
   const isSetupWorking = useAppStore((state) => state.isSetupWorking)
   const loadApp = useAppStore((state) => state.loadApp)
+  const appUpdate = useAppStore((state) => state.appUpdate)
+  const appUpdateStatus = useAppStore((state) => state.appUpdateStatus)
+  const appUpdateProgress = useAppStore((state) => state.appUpdateProgress)
+  const dismissedAppUpdateVersion = useAppStore((state) => state.dismissedAppUpdateVersion)
+  const isApplyingAppUpdate = useAppStore((state) => state.isApplyingAppUpdate)
+  const checkForAppUpdate = useAppStore((state) => state.checkForAppUpdate)
+  const downloadAppUpdate = useAppStore((state) => state.downloadAppUpdate)
+  const installAppUpdate = useAppStore((state) => state.installAppUpdate)
+  const dismissAppUpdate = useAppStore((state) => state.dismissAppUpdate)
   const detectObs = useAppStore((state) => state.detectObs)
   const chooseObsDirectory = useAppStore((state) => state.chooseObsDirectory)
   const saveObsPath = useAppStore((state) => state.saveObsPath)
   const handleInstallProgress = useAppStore((state) => state.handleInstallProgress)
+  const handleAppUpdateProgress = useAppStore((state) => state.handleAppUpdateProgress)
+  const openExternal = useAppStore((state) => state.openExternal)
   const [systemPrefersLight, setSystemPrefersLight] = useState(() =>
     window.matchMedia('(prefers-color-scheme: light)').matches,
   )
+  const [isStartupUpdateCheckComplete, setIsStartupUpdateCheckComplete] = useState(false)
+  const [bypassedRequiredUpdateVersion, setBypassedRequiredUpdateVersion] = useState<string | null>(null)
+  const startupUpdateCheckStartedRef = useRef(false)
 
   const themePreference: ThemeMode = bootstrap?.settings.theme ?? 'dark'
   const effectiveTheme =
@@ -121,7 +153,8 @@ function App() {
   useEffect(() => {
     void loadApp()
 
-    let unlisten: (() => void) | undefined
+    let unlistenInstall: (() => void) | undefined
+    let unlistenAppUpdate: (() => void) | undefined
     let disposed = false
 
     void desktopApi.onInstallProgress((progress) => {
@@ -131,14 +164,25 @@ function App() {
         cleanup()
         return
       }
-      unlisten = cleanup
+      unlistenInstall = cleanup
+    })
+
+    void desktopApi.onAppUpdateProgress((progress) => {
+      handleAppUpdateProgress(progress)
+    }).then((cleanup) => {
+      if (disposed) {
+        cleanup()
+        return
+      }
+      unlistenAppUpdate = cleanup
     })
 
     return () => {
       disposed = true
-      unlisten?.()
+      unlistenInstall?.()
+      unlistenAppUpdate?.()
     }
-  }, [handleInstallProgress, loadApp])
+  }, [handleAppUpdateProgress, handleInstallProgress, loadApp])
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: light)')
@@ -163,6 +207,17 @@ function App() {
       accentColorMap[accentColor],
     )
   }, [bootstrap?.settings.accentColor, bootstrap?.settings.language, effectiveTheme])
+
+  useEffect(() => {
+    if (!bootstrap || startupUpdateCheckStartedRef.current) {
+      return
+    }
+
+    startupUpdateCheckStartedRef.current = true
+    void checkForAppUpdate({ silent: true }).finally(() => {
+      setIsStartupUpdateCheckComplete(true)
+    })
+  }, [bootstrap, checkForAppUpdate])
 
   if (isBootstrapping) {
     return (
@@ -197,12 +252,59 @@ function App() {
     )
   }
 
+  if (!isStartupUpdateCheckComplete) {
+    return (
+      <>
+        <LoadingScreen />
+        <Toaster position="top-right" richColors theme={toasterTheme} />
+      </>
+    )
+  }
+
+  const canBypassRequiredUpdate = import.meta.env.DEV && bootstrap.settings.developerMode
+  const allowRequiredUpdateBypass =
+    canBypassRequiredUpdate && bypassedRequiredUpdateVersion === appUpdate?.latestVersion
+  const requiredUpdateBlocked = isRequiredUpdate(appUpdate) && !allowRequiredUpdateBypass
+  const showOptionalUpdateDialog = Boolean(
+    appUpdate &&
+      !requiredUpdateBlocked &&
+      ((appUpdateStatus === 'update-available' &&
+        dismissedAppUpdateVersion !== appUpdate.latestVersion) ||
+        appUpdateStatus === 'downloading' ||
+        appUpdateStatus === 'ready-to-restart' ||
+        (appUpdateStatus === 'failed' &&
+          Boolean(appUpdate.latestVersion || appUpdate.selectedAssetUrl))),
+  )
+
   const needsSetup =
     !bootstrap.settings.setupCompleted || !bootstrap.settings.obsPath
 
   return (
     <>
-      {needsSetup ? (
+      {requiredUpdateBlocked && appUpdate ? (
+        <RequiredUpdateScreen
+          canBypass={canBypassRequiredUpdate}
+          isApplying={isApplyingAppUpdate}
+          onBypass={() => setBypassedRequiredUpdateVersion(appUpdate.latestVersion ?? '__dev__')}
+          onDownload={() => {
+            void downloadAppUpdate()
+          }}
+          onInstall={() => {
+            void installAppUpdate()
+          }}
+          onOpenManualFallback={
+            appUpdate.selectedAssetUrl
+              ? () => void openExternal(appUpdate.selectedAssetUrl ?? '')
+              : undefined
+          }
+          onRetry={() => {
+            void checkForAppUpdate({ forcePrompt: true })
+          }}
+          progress={appUpdateProgress}
+          snapshot={appUpdate}
+          status={appUpdateStatus}
+        />
+      ) : needsSetup ? (
         <SetupWizard
           detection={bootstrap.obsDetection}
           isBusy={isSetupWorking}
@@ -223,6 +325,29 @@ function App() {
           </Routes>
         </HashRouter>
       )}
+      {showOptionalUpdateDialog && appUpdate ? (
+        <AppUpdateDialog
+          isApplying={isApplyingAppUpdate}
+          onDismiss={dismissAppUpdate}
+          onDownload={() => {
+            void downloadAppUpdate()
+          }}
+          onInstall={() => {
+            void installAppUpdate()
+          }}
+          onOpenManualFallback={
+            appUpdate.selectedAssetUrl
+              ? () => void openExternal(appUpdate.selectedAssetUrl ?? '')
+              : undefined
+          }
+          onRetry={() => {
+            void checkForAppUpdate({ forcePrompt: true })
+          }}
+          progress={appUpdateProgress}
+          snapshot={appUpdate}
+          status={appUpdateStatus}
+        />
+      ) : null}
       <Toaster position="top-right" richColors theme={toasterTheme} />
     </>
   )

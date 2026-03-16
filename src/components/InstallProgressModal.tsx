@@ -12,17 +12,23 @@ import {
 import type { InstallProgressEvent, InstallResponse } from '../types/desktop'
 import type { PluginCatalogEntry } from '../types/plugin'
 import { isScriptPlugin } from '../lib/utils'
+import { ConfirmDialog } from './ui/ConfirmDialog'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
+import { CopyPathField } from './ui/CopyPathField'
+import { useState } from 'react'
 
 interface InstallProgressModalProps {
   plugin?: PluginCatalogEntry
   progress: InstallProgressEvent | null
   lastResponse: InstallResponse | null
   onClose: () => void
+  onCancelInstall?: () => void
   onOpenInstallFolder?: () => void
+  onOpenInstallerManually?: () => void
   onOpenSource?: () => void
   onViewPlugin?: () => void
+  isCanceling?: boolean
 }
 
 function ProgressSteps({
@@ -33,9 +39,11 @@ function ProgressSteps({
   const steps = [
     { key: 'preparing', label: 'Preparing' },
     { key: 'downloading', label: 'Downloading' },
+    { key: 'verifying', label: 'Verifying' },
     { key: 'extracting', label: 'Extracting' },
     { key: 'inspecting', label: 'Inspecting package' },
     { key: 'installing', label: 'Installing' },
+    { key: 'launching-installer', label: 'Launching installer' },
   ] as const
 
   const activeIndex = (() => {
@@ -44,13 +52,17 @@ function ProgressSteps({
         return 0
       case 'downloading':
         return 1
-      case 'extracting':
+      case 'verifying':
         return 2
+      case 'extracting':
+        return 3
       case 'inspecting':
       case 'review':
-        return 3
-      default:
         return 4
+      case 'launching-installer':
+        return 6
+      default:
+        return 5
     }
   })()
 
@@ -86,20 +98,38 @@ function ProgressSteps({
 export function InstallProgressModal({
   lastResponse,
   onClose,
+  onCancelInstall,
   onOpenInstallFolder,
+  onOpenInstallerManually,
   onOpenSource,
   onViewPlugin,
   plugin,
   progress,
+  isCanceling = false,
 }: InstallProgressModalProps) {
+  const [confirmingClose, setConfirmingClose] = useState(false)
+
   if (!progress) {
     return null
   }
 
   const isTerminal = progress.terminal ?? false
   const isError = progress.stage === 'error'
+  const isCanceled = progress.stage === 'canceled'
   const isReview = progress.stage === 'review' || Boolean(lastResponse?.reviewPlan)
   const isManual = progress.stage === 'manual'
+  const installerStarted = Boolean(lastResponse?.installerStarted)
+  const isActiveInstall =
+    !isTerminal &&
+    !isError &&
+    !isReview &&
+    !isManual &&
+    progress.stage !== 'completed' &&
+    progress.stage !== 'canceled'
+  const canCancel = isActiveInstall && Boolean(onCancelInstall)
+  const isDownloadPhase =
+    progress.stage === 'preparing' || progress.stage === 'downloading'
+  const cancelLabel = isDownloadPhase ? 'Cancel download' : 'Stop install safely'
   const isScriptInstall = isScriptPlugin(
     plugin,
     lastResponse?.installedPlugin,
@@ -117,12 +147,16 @@ export function InstallProgressModal({
       return 'Installation failed'
     }
 
+    if (isCanceled) {
+      return 'Download canceled'
+    }
+
     if (isReview) {
       return 'Review required'
     }
 
     if (isManual) {
-      return 'Installer downloaded'
+      return installerStarted ? 'Installer started' : 'Installer downloaded'
     }
 
     if (isTerminal && isScriptInstall) {
@@ -148,8 +182,16 @@ export function InstallProgressModal({
           </div>
           <button
             className="rounded-lg border border-white/10 p-2 text-slate-500 transition-colors hover:bg-white/[0.04] hover:text-white"
-            onClick={onClose}
+            onClick={() => {
+              if (canCancel) {
+                setConfirmingClose(true)
+                return
+              }
+
+              onClose()
+            }}
             type="button"
+            disabled={isCanceling}
           >
             <X className="size-4" />
           </button>
@@ -174,9 +216,7 @@ export function InstallProgressModal({
                 <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
                   Installed file path
                 </p>
-                <p className="mt-2 break-all font-mono text-xs text-slate-300">
-                  {scriptFilePath}
-                </p>
+                <CopyPathField className="mt-2" value={scriptFilePath} />
               </div>
             ) : null}
 
@@ -210,6 +250,29 @@ export function InstallProgressModal({
                   </p>
                 </div>
               </div>
+            ) : isCanceled ? (
+              <div className="space-y-4">
+                <div className="flex items-start gap-3 rounded-lg border border-amber-400/20 bg-amber-500/10 p-4">
+                  <AlertCircle className="mt-0.5 size-5 text-amber-300" />
+                  <div>
+                    <p className="text-sm font-semibold text-white">Download canceled</p>
+                    <p className="mt-1 text-sm leading-7 text-slate-300">
+                      {progress.detail ?? progress.message}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {onViewPlugin ? (
+                    <Button variant="outline" onClick={onViewPlugin}>
+                      <ArrowRight className="size-4" />
+                      View Plugin Details
+                    </Button>
+                  ) : null}
+                  <Button variant="ghost" onClick={onClose}>
+                    Close
+                  </Button>
+                </div>
+              </div>
             ) : isReview ? (
               <div className="space-y-3">
                 <div className="rounded-lg border border-amber-400/20 bg-amber-500/10 p-4">
@@ -239,14 +302,24 @@ export function InstallProgressModal({
             ) : isManual ? (
               <div className="space-y-4">
                 <div className="rounded-lg border border-primary/20 bg-primary/10 p-4">
-                  <p className="text-sm font-semibold text-white">The installer is ready.</p>
+                  <p className="text-sm font-semibold text-white">
+                    {installerStarted
+                      ? 'The installer started successfully.'
+                      : 'The installer is ready to open manually.'}
+                  </p>
                   <p className="mt-1 text-sm leading-7 text-slate-300">
                     {progress.detail ?? progress.message}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-2">
+                  {onOpenInstallerManually ? (
+                    <Button variant="secondary" onClick={onOpenInstallerManually}>
+                      <FolderOpen className="size-4" />
+                      Open installer manually
+                    </Button>
+                  ) : null}
                   {onOpenSource ? (
-                    <Button variant="secondary" onClick={onOpenSource}>
+                    <Button variant="outline" onClick={onOpenSource}>
                       <ExternalLink className="size-4" />
                       View Source Page
                     </Button>
@@ -313,16 +386,45 @@ export function InstallProgressModal({
                 </div>
 
                 <div className="flex justify-end">
-                  <Badge tone="neutral">
+                  <div className="flex items-center gap-2">
+                    {canCancel ? (
+                      <Button
+                        disabled={isCanceling}
+                        variant="outline"
+                        onClick={() => void onCancelInstall?.()}
+                      >
+                        {isCanceling ? 'Canceling…' : cancelLabel}
+                      </Button>
+                    ) : null}
+                    <Badge tone="neutral">
                     <ShieldCheck className="size-3.5" />
                     Safe install workflow
-                  </Badge>
+                    </Badge>
+                  </div>
                 </div>
               </>
             )}
           </div>
         )}
       </div>
+
+      <ConfirmDialog
+        cancelLabel="Keep installing"
+        confirmLabel={cancelLabel}
+        description={
+          isDownloadPhase
+            ? 'This will stop the current download, remove any partial file, and return the plugin to a retryable state.'
+            : 'This will stop the install after the current step, clean temporary files where possible, and leave the plugin ready to retry.'
+        }
+        isBusy={isCanceling}
+        onCancel={() => setConfirmingClose(false)}
+        onConfirm={() => {
+          setConfirmingClose(false)
+          void onCancelInstall?.()
+        }}
+        open={confirmingClose}
+        title={cancelLabel}
+      />
     </div>
   )
 }

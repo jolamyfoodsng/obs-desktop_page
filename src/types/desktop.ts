@@ -7,6 +7,7 @@ import type {
 export type InstallProgressStage =
   | 'preparing'
   | 'downloading'
+  | 'verifying'
   | 'extracting'
   | 'inspecting'
   | 'installing'
@@ -14,6 +15,7 @@ export type InstallProgressStage =
   | 'completed'
   | 'manual'
   | 'review'
+  | 'canceled'
   | 'error'
 
 export type InstalledPluginStatus =
@@ -127,6 +129,43 @@ export interface BootstrapPayload {
   plugins: PluginCatalogEntry[]
   installedPlugins: InstalledPluginRecord[]
   currentPlatform: string
+  currentVersion: string
+}
+
+export type AppUpdateStatus =
+  | 'idle'
+  | 'disabled'
+  | 'checking'
+  | 'no-update'
+  | 'update-available'
+  | 'update-required'
+  | 'downloading'
+  | 'ready-to-restart'
+  | 'failed'
+
+export interface AppUpdateSnapshot {
+  status: Exclude<AppUpdateStatus, 'idle' | 'checking' | 'downloading'>
+  message: string
+  currentVersion: string
+  latestVersion?: string | null
+  minimumSupportedVersion?: string | null
+  releaseNotes?: string | null
+  publishedAt?: string | null
+  updateChannel: string
+  releaseTag?: string | null
+  releaseUrl?: string | null
+  selectedAssetName?: string | null
+  selectedAssetReason?: string | null
+  selectedAssetUrl?: string | null
+  selectedAssetSize?: number | null
+}
+
+export interface AppUpdateProgressEvent {
+  stage: 'started' | 'progress' | 'finished'
+  downloadedBytes: number
+  totalBytes?: number | null
+  progressPercent?: number | null
+  message: string
 }
 
 export interface InstallRequest {
@@ -137,6 +176,11 @@ export interface InstallRequest {
   githubAssetUrl?: string | null
 }
 
+export interface CancelInstallResponse {
+  canceled: boolean
+  message: string
+}
+
 export interface InstallResponse {
   success: boolean
   code?: string
@@ -144,6 +188,8 @@ export interface InstallResponse {
   installedPlugin?: InstalledPluginRecord
   manualInstallerPath?: string
   downloadPath?: string
+  installerStarted?: boolean
+  canOpenInstallerManually?: boolean
   requiresRestart?: boolean
   conflicts?: string[]
   reviewPlan?: InstallReviewPlan | null

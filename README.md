@@ -80,6 +80,118 @@ npm run build:release
 
 This runs a full Tauri release build and produces distributable bundles under `src-tauri/target/release/bundle/`.
 
+## Private update system
+
+This app now supports a private, Vercel-backed update pipeline for Tauri v2.
+
+### Architecture
+
+1. GitHub Releases stay the source of truth for signed desktop artifacts.
+2. A Vercel serverless API reads private release metadata using a server-side GitHub token.
+3. The Tauri app talks only to the Vercel API.
+4. The app blocks old builds when `currentVersion < minimumSupportedVersion`.
+
+### Vercel API routes
+
+These routes live in `api/` and are designed for Vercel Functions:
+
+- `api/update.ts`
+  - returns normalized release metadata
+  - includes `latestVersion`, `minimumSupportedVersion`, release notes, and platform manifests
+- `api/update/[target]/[arch]/[bundleType]/[currentVersion].ts`
+  - returns the Tauri updater-compatible manifest for the current client
+  - returns `204 No Content` when no update is available
+- `api/download/[target]/[arch]/[bundleType]/[version].ts`
+  - securely proxies the selected private GitHub Release asset to the app
+  - keeps the GitHub token server-side only
+
+The metadata route also returns actionable statuses for cases like:
+
+- no installable asset for the current platform
+- ambiguous assets
+- source-only releases
+
+### Required Vercel environment variables
+
+Set these in the Vercel project:
+
+- `GITHUB_TOKEN`
+  - GitHub token with read access to the private desktop repo releases
+- `GITHUB_OWNER`
+  - repo owner or org
+- `GITHUB_REPO`
+  - repo name
+
+Optional Vercel environment variables:
+
+- `PUBLIC_BASE_URL`
+  - public Vercel domain, for example `https://updates.example.com`
+  - if omitted, the API derives it from the incoming request host
+- `UPDATE_CHANNEL`
+  - defaults metadata selection to `stable`
+  - supported values in this implementation: `stable`, `beta`
+- `MINIMUM_SUPPORTED_VERSION`
+  - global fallback minimum supported version
+  - defaults to `0.0.0` when not set
+
+### Release frontmatter for forced updates
+
+You can set the minimum supported version per release in the GitHub Release body:
+
+```md
+---
+minimumSupportedVersion: 1.1.0
+---
+
+Bug fixes and installer improvements.
+```
+
+If that frontmatter is absent, the Vercel API falls back to `MINIMUM_SUPPORTED_VERSION`, then to `0.0.0`.
+
+## Desktop updater behavior
+
+### Launch flow
+
+On app launch, the desktop app:
+
+- loads local state
+- checks the private update metadata route
+- compares `currentVersion`, `latestVersion`, and `minimumSupportedVersion`
+- decides one of:
+  - no update
+  - optional update
+  - required update
+
+### Optional updates
+
+If `currentVersion < latestVersion` but `currentVersion >= minimumSupportedVersion`, the app shows a compact in-app update dialog with:
+
+- `Update now`
+- `Remind me later`
+
+Downloads happen inside the app. After the download finishes, the user sees `Restart to finish updating`.
+
+### Required updates
+
+If `currentVersion < minimumSupportedVersion`, the app blocks normal usage behind a required update screen.
+
+The required update screen only allows:
+
+- `Update now`
+- `Retry`
+
+There is also a development-only bypass for local dev builds when the app is already in developer mode.
+
+### Settings page
+
+The Settings screen now includes:
+
+- current app version
+- current update channel
+- `Check for updates`
+- current update status
+- selected asset and reason when an update is found
+
 ## GitHub release automation
 
 This repository includes a GitHub Actions workflow at `.github/workflows/release.yml`.
@@ -102,17 +214,48 @@ For each published release, GitHub Actions:
   - `src-tauri/Cargo.toml`
 - verifies that the GitHub release tag matches the app version
 - builds Tauri release bundles
-- uploads the generated desktop artifacts back to the GitHub Release page
+- generates updater signatures because `bundle.createUpdaterArtifacts` is enabled
+- uploads both installer artifacts and `.sig` files back to the GitHub Release page
 
-### What files get uploaded
+### GitHub Actions variables and secrets
 
-The workflow currently uploads the standard desktop distributables produced by Tauri for this project:
+Set these on the GitHub repo before running release builds:
 
-- Windows: `*.exe`, `*.msi`
-- Linux: `*.AppImage`, `*.deb`
-- macOS: `*.dmg`
+- repository variables:
+  - `TAURI_UPDATE_BASE_URL`
+    - public Vercel update server URL, for example `https://updates.example.com`
+  - `TAURI_UPDATER_PUBLIC_KEY`
+    - public updater signing key used by the Tauri client
+- repository secrets:
+  - `TAURI_SIGNING_PRIVATE_KEY`
+    - private updater signing key
+  - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`
+    - password for the signing key, if used
 
-Artifacts appear directly on the GitHub Release that triggered the workflow.
+Optional GitHub Actions variable:
+
+- `TAURI_UPDATE_BUNDLE_TYPE`
+  - this implementation defaults Windows metadata to `nsis`, Linux to `appimage`, and macOS to `app`
+  - the real updater install path still uses Tauri's own runtime bundle type during manifest checks
+
+### What files the Vercel API expects
+
+The update server expects the GitHub Release to contain signed installer assets such as:
+
+- Windows:
+  - `*.exe`
+  - `*.msi`
+  - matching `*.sig`
+- Linux:
+  - `*.AppImage`
+  - `*.deb`
+  - `*.rpm` if you add RPM builds later
+  - matching `*.sig`
+- macOS scaffold:
+  - `*.app.tar.gz`
+  - matching `*.sig`
+
+This implementation intentionally ignores source-code archives when installable binaries exist.
 
 ## Versioning
 
@@ -175,16 +318,74 @@ Before the first GitHub release, do these manual steps:
 - create the first tagged GitHub Release using the same version
 - optionally update package metadata like repository URL or license later if you want richer public package metadata
 
-## Signing notes
+## Local and production testing
 
-This pipeline is designed to work without code signing for the initial Windows, Linux, and macOS release flow.
+### Test the Vercel API locally
 
-If you add signing later, keep the workflow structure and add the appropriate secrets for your chosen signing setup. Common additions later include:
+1. Export the required Vercel environment variables locally.
+2. Run the Vercel Functions locally with:
 
-- Tauri updater signing secrets such as `TAURI_SIGNING_PRIVATE_KEY`
-- platform-specific signing credentials for Windows or macOS
+```bash
+vercel dev
+```
 
-Unsigned release automation is intentionally not blocked by those future signing steps.
+3. Verify the metadata route manually:
+
+```bash
+curl "http://localhost:3000/api/update?currentVersion=0.1.0&target=windows&arch=x86_64&bundleType=nsis"
+```
+
+### Test the desktop app locally
+
+Set these environment variables before starting the Tauri app locally:
+
+- `TAURI_UPDATE_BASE_URL`
+- `TAURI_UPDATER_PUBLIC_KEY`
+- optional `TAURI_UPDATE_BUNDLE_TYPE`
+
+Then run:
+
+```bash
+npm run dev
+```
+
+Recommended local checks:
+
+- optional update:
+  - run a build below the newest release version
+  - confirm the optional in-app prompt appears
+- forced update:
+  - publish or pin a release whose `minimumSupportedVersion` is higher than the local app version
+  - confirm the required update screen blocks the app
+- missing asset:
+  - test a release without a platform asset and confirm the message is actionable
+
+### Production verification
+
+Before shipping a new release:
+
+- confirm the GitHub Release contains the expected installer files and `.sig` files
+- confirm the Vercel metadata route returns the correct `latestVersion`
+- confirm the Tauri dynamic updater route returns `204` for current builds and `200` for older ones
+- test one Windows and one Linux installation end-to-end:
+  - check
+  - download
+  - apply
+  - restart
+
+## Signing and final production setup
+
+This updater flow is production-minded, but you still need real release-signing inputs in GitHub Actions:
+
+- `TAURI_SIGNING_PRIVATE_KEY`
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` if your key uses one
+
+You may also still want platform-native signing later:
+
+- Windows code signing
+- macOS notarization and signing
+
+The updater flow is already structured so those later steps can be layered on without changing the Vercel API contract.
 
 ## Project structure
 

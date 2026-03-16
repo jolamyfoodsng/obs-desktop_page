@@ -455,6 +455,7 @@ pub fn bootstrap(app: AppHandle) -> Result<BootstrapPayload, String> {
         plugins,
         installed_plugins,
         current_platform: SupportedPlatform::current().as_str().to_string(),
+        current_version: app.package_info().version.to_string(),
     })
 }
 

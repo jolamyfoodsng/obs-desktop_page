@@ -2,10 +2,12 @@ import { type ReactNode, useState } from 'react'
 import {
   Bell,
   BrushCleaning,
+  Download,
   FolderCog,
   Languages,
   MonitorCog,
   Palette,
+  RefreshCw,
   Settings2,
   TerminalSquare,
   Trash2,
@@ -14,6 +16,7 @@ import {
 
 import { Button } from '../components/ui/Button'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
+import { CopyPathField } from '../components/ui/CopyPathField'
 import { cn } from '../lib/utils'
 import { useAppStore } from '../stores/appStore'
 import type { AppSettings } from '../types/desktop'
@@ -103,6 +106,14 @@ export function SettingsPage() {
   const bootstrap = useAppStore((state) => state.bootstrap)
   const chooseObsDirectory = useAppStore((state) => state.chooseObsDirectory)
   const updateSettings = useAppStore((state) => state.updateSettings)
+  const appUpdate = useAppStore((state) => state.appUpdate)
+  const appUpdateStatus = useAppStore((state) => state.appUpdateStatus)
+  const appUpdateProgress = useAppStore((state) => state.appUpdateProgress)
+  const isCheckingAppUpdate = useAppStore((state) => state.isCheckingAppUpdate)
+  const isApplyingAppUpdate = useAppStore((state) => state.isApplyingAppUpdate)
+  const checkForAppUpdate = useAppStore((state) => state.checkForAppUpdate)
+  const downloadAppUpdate = useAppStore((state) => state.downloadAppUpdate)
+  const installAppUpdate = useAppStore((state) => state.installAppUpdate)
   const clearCache = useAppStore((state) => state.clearCache)
   const exportLogs = useAppStore((state) => state.exportLogs)
   const resetAppData = useAppStore((state) => state.resetAppData)
@@ -212,19 +223,29 @@ export function SettingsPage() {
                 </Button>
               </div>
 
-              <div className="mt-4 rounded-2xl border border-primary/10 bg-[#100915] px-4 py-3 font-mono text-xs text-primary/90">
-                {bootstrap?.settings.obsPath ?? 'OBS has not been configured yet.'}
-              </div>
+              {bootstrap?.settings.obsPath ? (
+                <CopyPathField
+                  className="mt-4"
+                  codeClassName="rounded-2xl px-4 py-3 text-xs"
+                  value={bootstrap.settings.obsPath}
+                />
+              ) : (
+                <div className="ui-code-block mt-4 rounded-2xl px-4 py-3 text-xs">
+                  OBS has not been configured yet.
+                </div>
+              )}
 
               {bootstrap?.obsDetection.installTargetPath ? (
                 <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3">
                   <p className="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">
                     Plugin target
                   </p>
-                  <p className="mt-2 break-all text-sm text-slate-300">
-                    {bootstrap.obsDetection.installTargetLabel}:{' '}
-                    {bootstrap.obsDetection.installTargetPath}
-                  </p>
+                  <CopyPathField
+                    className="mt-2"
+                    codeClassName="rounded-xl bg-transparent px-0 py-0 text-sm text-slate-300"
+                    displayValue={`${bootstrap.obsDetection.installTargetLabel}: ${bootstrap.obsDetection.installTargetPath}`}
+                    value={bootstrap.obsDetection.installTargetPath}
+                  />
                 </div>
               ) : null}
             </div>
@@ -256,7 +277,7 @@ export function SettingsPage() {
                   className={cn(
                     'rounded-2xl border px-4 py-3 text-sm font-medium transition-all disabled:cursor-not-allowed disabled:opacity-60',
                     preferences.installScope === 'user'
-                      ? 'border-primary bg-primary/10 text-white'
+                      ? 'border-primary bg-primary text-on-accent'
                       : 'border-white/10 bg-white/[0.03] text-slate-400',
                   )}
                   disabled={isSettingsWorking}
@@ -269,7 +290,7 @@ export function SettingsPage() {
                   className={cn(
                     'rounded-2xl border px-4 py-3 text-sm font-medium transition-all disabled:cursor-not-allowed disabled:opacity-60',
                     preferences.installScope === 'global'
-                      ? 'border-primary bg-primary/10 text-white'
+                      ? 'border-primary bg-primary text-on-accent'
                       : 'border-white/10 bg-white/[0.03] text-slate-400',
                   )}
                   disabled={isSettingsWorking}
@@ -357,6 +378,102 @@ export function SettingsPage() {
 
         <SettingSection icon={<Bell className="size-5" />} title="Updates & Notifications">
           <div className="space-y-4">
+            <div className="rounded-[24px] border border-white/10 bg-white/[0.04] p-5">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0">
+                  <p className="font-semibold text-white">Desktop app updates</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-400">
+                    Keep this Tauri app current through the private Vercel update service, without
+                    leaving the app.
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    disabled={isCheckingAppUpdate || appUpdateStatus === 'downloading'}
+                    variant="secondary"
+                    onClick={() => void checkForAppUpdate({ forcePrompt: true })}
+                  >
+                    <RefreshCw className={cn('size-4', isCheckingAppUpdate ? 'animate-spin' : '')} />
+                    Check for updates
+                  </Button>
+                  {appUpdateStatus === 'update-available' ? (
+                    <Button onClick={() => void downloadAppUpdate()}>
+                      <Download className="size-4" />
+                      Update now
+                    </Button>
+                  ) : null}
+                  {appUpdateStatus === 'ready-to-restart' ? (
+                    <Button disabled={isApplyingAppUpdate} onClick={() => void installAppUpdate()}>
+                      <RefreshCw className="size-4" />
+                      {isApplyingAppUpdate ? 'Applying update...' : 'Restart to finish updating'}
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                {[
+                  ['Current version', `v${bootstrap?.currentVersion ?? '0.0.0'}`],
+                  ['Channel', preferences.betaUpdates ? 'beta' : 'stable'],
+                  [
+                    'Status',
+                    appUpdateStatus === 'idle'
+                      ? 'Not checked yet'
+                      : appUpdateStatus.replace(/-/g, ' '),
+                  ],
+                ].map(([label, value]) => (
+                  <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3" key={label}>
+                    <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500">
+                      {label}
+                    </p>
+                    <p className="mt-2 text-sm font-semibold text-white">{value}</p>
+                  </div>
+                ))}
+              </div>
+
+              {appUpdate ? (
+                <div className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-4">
+                  <p className="text-sm font-semibold text-white">{appUpdate.message}</p>
+                  {appUpdate.latestVersion ? (
+                    <p className="mt-2 text-sm leading-6 text-slate-400">
+                      Latest release: v{appUpdate.latestVersion}
+                      {appUpdate.minimumSupportedVersion
+                        ? ` • minimum supported: v${appUpdate.minimumSupportedVersion}`
+                        : ''}
+                    </p>
+                  ) : null}
+                  {appUpdate.selectedAssetName ? (
+                    <p className="mt-2 text-sm leading-6 text-slate-400">
+                      Selected asset: {appUpdate.selectedAssetName}
+                    </p>
+                  ) : null}
+                  {appUpdate.selectedAssetReason ? (
+                    <p className="mt-1 text-sm leading-6 text-slate-500">
+                      Reason: {appUpdate.selectedAssetReason}
+                    </p>
+                  ) : null}
+                  {appUpdateProgress ? (
+                    <div className="mt-4">
+                      <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+                        <span>{appUpdateProgress.message}</span>
+                        <span>
+                          {typeof appUpdateProgress.progressPercent === 'number'
+                            ? `${Math.round(appUpdateProgress.progressPercent)}%`
+                            : 'Working...'}
+                        </span>
+                      </div>
+                      <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/[0.08]">
+                        <div
+                          className="h-full rounded-full bg-primary transition-all"
+                          style={{ width: `${Math.max(appUpdateProgress.progressPercent ?? 10, 10)}%` }}
+                        />
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+
             <SettingToggle
               checked={preferences.autoUpdatePlugins}
               description="Install curated plugin updates in the background when it is safe to do so."

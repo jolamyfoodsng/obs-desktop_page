@@ -6,7 +6,8 @@ use commands::detect_obs::{
     choose_obs_directory, detect_obs, save_obs_path, validate_obs_path_command,
 };
 use commands::install_plugin::{
-    get_github_release_info, install_plugin, open_external, reveal_path,
+    cancel_plugin_install, get_github_release_info, install_plugin, open_external,
+    open_local_path, reveal_path, InstallCancellationRegistry,
 };
 use commands::settings::{
     clear_app_cache, export_logs, reset_app_state, save_app_settings, sync_autostart_setting,
@@ -14,6 +15,10 @@ use commands::settings::{
 };
 use commands::state::{adopt_installation, bootstrap};
 use commands::store::load_state;
+use commands::update::{
+    check_app_update, clear_cached_app_update, download_app_update, get_cached_app_update_snapshot,
+    install_app_update, AppUpdateRegistry,
+};
 use tauri::{
     menu::MenuEvent,
     menu::MenuBuilder,
@@ -36,10 +41,17 @@ fn show_main_window(app: &tauri::AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(InstallCancellationRegistry::default())
+        .manage(AppUpdateRegistry::default())
         .plugin(tauri_plugin_autostart::init(
             MacosLauncher::LaunchAgent,
             None::<Vec<&str>>,
         ))
+        .plugin(
+            tauri_plugin_updater::Builder::new()
+                .pubkey(option_env!("TAURI_UPDATER_PUBLIC_KEY").unwrap_or_default())
+                .build(),
+        )
         .on_tray_icon_event(|app, event| {
             if let TrayIconEvent::Click {
                 button: MouseButton::Left,
@@ -109,8 +121,10 @@ pub fn run() {
             save_obs_path,
             validate_obs_path_command,
             install_plugin,
+            cancel_plugin_install,
             get_github_release_info,
             open_external,
+            open_local_path,
             reveal_path,
             save_app_settings,
             clear_app_cache,
@@ -118,6 +132,11 @@ pub fn run() {
             reset_app_state,
             uninstall_plugin,
             adopt_installation,
+            check_app_update,
+            download_app_update,
+            install_app_update,
+            get_cached_app_update_snapshot,
+            clear_cached_app_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

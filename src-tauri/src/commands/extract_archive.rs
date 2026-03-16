@@ -30,11 +30,19 @@ fn sanitize_relative_path(path: &Path) -> Result<PathBuf, AppError> {
     Ok(sanitized)
 }
 
-fn extract_zip(archive_path: &Path, destination: &Path) -> Result<(), AppError> {
+fn extract_zip(
+    archive_path: &Path,
+    destination: &Path,
+    should_cancel: &dyn Fn() -> bool,
+) -> Result<(), AppError> {
     let file = File::open(archive_path)?;
     let mut archive = ZipArchive::new(file)?;
 
     for index in 0..archive.len() {
+        if should_cancel() {
+            return Err(AppError::canceled("Installation was canceled during extraction."));
+        }
+
         let mut entry = archive.by_index(index)?;
         let relative_path = entry
             .enclosed_name()
@@ -52,17 +60,29 @@ fn extract_zip(archive_path: &Path, destination: &Path) -> Result<(), AppError> 
 
         let mut output_file = File::create(output_path)?;
         std::io::copy(&mut entry, &mut output_file)?;
+
+        if should_cancel() {
+            return Err(AppError::canceled("Installation was canceled during extraction."));
+        }
     }
 
     Ok(())
 }
 
-fn extract_tar_xz(archive_path: &Path, destination: &Path) -> Result<(), AppError> {
+fn extract_tar_xz(
+    archive_path: &Path,
+    destination: &Path,
+    should_cancel: &dyn Fn() -> bool,
+) -> Result<(), AppError> {
     let file = File::open(archive_path)?;
     let decoder = XzDecoder::new(file);
     let mut archive = Archive::new(decoder);
 
     for entry in archive.entries()? {
+        if should_cancel() {
+            return Err(AppError::canceled("Installation was canceled during extraction."));
+        }
+
         let mut entry = entry?;
         let relative_path = sanitize_relative_path(&entry.path()?)?;
         let output_path = destination.join(relative_path);
@@ -72,6 +92,10 @@ fn extract_tar_xz(archive_path: &Path, destination: &Path) -> Result<(), AppErro
         }
 
         entry.unpack(output_path)?;
+
+        if should_cancel() {
+            return Err(AppError::canceled("Installation was canceled during extraction."));
+        }
     }
 
     Ok(())
@@ -81,6 +105,7 @@ pub fn extract_archive(
     archive_path: &Path,
     destination: &Path,
     file_type: &PluginPackageFileType,
+    should_cancel: &dyn Fn() -> bool,
 ) -> Result<(), AppError> {
     if destination.exists() {
         fs::remove_dir_all(destination)?;
@@ -88,8 +113,8 @@ pub fn extract_archive(
     fs::create_dir_all(destination)?;
 
     match file_type {
-        PluginPackageFileType::Zip => extract_zip(archive_path, destination),
-        PluginPackageFileType::TarXz => extract_tar_xz(archive_path, destination),
+        PluginPackageFileType::Zip => extract_zip(archive_path, destination, should_cancel),
+        PluginPackageFileType::TarXz => extract_tar_xz(archive_path, destination, should_cancel),
         _ => Err(AppError::message(
             "Only ZIP and tar.xz archives support one-click extraction in this MVP.",
         )),
