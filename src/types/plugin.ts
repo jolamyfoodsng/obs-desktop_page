@@ -51,9 +51,20 @@ export interface PluginCatalogEntry {
   category: string
   homepageUrl: string
   sourceUrl?: string | null
+  officialObsUrl?: string | null
+  githubUrl?: string | null
+  releaseUrl?: string | null
   githubRepo?: string | null
   githubReleaseUrl?: string | null
   githubReleaseTag?: string | null
+  updatedAt?: string | null
+  installType?: string | null
+  fileType?: string | null
+  resourceType?: 'plugin' | 'script' | 'tool' | 'theme' | 'overlay' | 'guide_only' | null
+  verifiedSource?: string | null
+  downloadCountRaw?: number | null
+  githubStars?: number | null
+  searchTags?: string[]
   preferredAssetPatterns?: string[]
   fallbackInstallType?: PluginPackageInstallType | null
   iconKey: string

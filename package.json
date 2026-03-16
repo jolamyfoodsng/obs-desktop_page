@@ -11,6 +11,7 @@
     "build:release": "node scripts/sync-updater-pubkey.mjs && tauri build",
     "build:ui": "tsc -b && vite build",
     "import:obs-resources": "python3 scripts/import_obs_resources.py",
+    "import:platform-catalog": "python3 scripts/import_platform_catalog.py",
     "lint": "eslint .",
     "preview": "vite preview",
     "sync:version": "node scripts/sync-version.cjs",
