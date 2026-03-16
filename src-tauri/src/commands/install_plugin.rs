@@ -1883,7 +1883,7 @@ fn launch_windows_installer(download_path: &Path, file_type: &PluginPackageFileT
 
         let mut command = match file_type {
             PluginPackageFileType::Exe => {
-                let mut command = Command::new(download_path);
+                let command = Command::new(download_path);
                 command
             }
             PluginPackageFileType::Msi => {

@@ -39,7 +39,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "REPLACE_WITH_TAURI_UPDATER_PUBLIC_KEY",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDUxNDAwMjAzM0QzMjNFNTYKUldSV1BqSTlBd0pBVVRzWnZmZUVBNW5tQkRsK2NJOXg0QWloOUNVblhlWmxzQkdVQy8vZ3p5WDMK",
       "endpoints": [
         "https://example.invalid/api/update/{{target}}/{{arch}}/{{bundle_type}}/{{current_version}}"
       ],

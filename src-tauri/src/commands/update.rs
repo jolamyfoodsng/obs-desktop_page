@@ -15,6 +15,7 @@ use crate::utils::errors::AppError;
 pub const APP_UPDATE_PROGRESS_EVENT: &str = "app-update-progress";
 
 const UPDATE_ROUTE_TIMEOUT: Duration = Duration::from_secs(20);
+const DEFAULT_UPDATER_PUBLIC_KEY: &str = include_str!("../../updater.pub.key");
 
 #[derive(Default)]
 pub struct AppUpdateRegistry {
@@ -67,10 +68,12 @@ fn update_base_url() -> Option<String> {
 }
 
 fn updater_public_key() -> Option<String> {
-    runtime_or_build_var(
-        "TAURI_UPDATER_PUBLIC_KEY",
-        option_env!("TAURI_UPDATER_PUBLIC_KEY"),
-    )
+    let key = DEFAULT_UPDATER_PUBLIC_KEY.trim();
+    if key.is_empty() {
+        None
+    } else {
+        Some(key.to_string())
+    }
 }
 
 fn bundle_type_label() -> String {

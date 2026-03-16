@@ -29,6 +29,11 @@ use tauri_plugin_autostart::MacosLauncher;
 
 const TRAY_OPEN_ID: &str = "tray-open";
 const TRAY_QUIT_ID: &str = "tray-quit";
+const DEFAULT_UPDATER_PUBLIC_KEY: &str = include_str!("../updater.pub.key");
+
+fn updater_public_key() -> &'static str {
+    DEFAULT_UPDATER_PUBLIC_KEY.trim()
+}
 
 fn show_main_window(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -49,7 +54,7 @@ pub fn run() {
         ))
         .plugin(
             tauri_plugin_updater::Builder::new()
-                .pubkey(option_env!("TAURI_UPDATER_PUBLIC_KEY").unwrap_or_default())
+                .pubkey(updater_public_key())
                 .build(),
         )
         .on_tray_icon_event(|app, event| {
