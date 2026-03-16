@@ -4,6 +4,7 @@ import {
   BrushCleaning,
   Download,
   FolderCog,
+  Keyboard,
   Languages,
   MonitorCog,
   Palette,
@@ -17,9 +18,53 @@ import {
 import { Button } from '../components/ui/Button'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { CopyPathField } from '../components/ui/CopyPathField'
+import { ShortcutHint } from '../components/ui/ShortcutHint'
 import { cn } from '../lib/utils'
 import { useAppStore } from '../stores/appStore'
 import type { AppSettings } from '../types/desktop'
+
+const keyboardShortcuts = [
+  {
+    title: 'Focus search',
+    description: 'Jump to the catalog search field and select the current text.',
+    keys: ['Ctrl/Cmd', 'K'],
+  },
+  {
+    title: 'Quick search',
+    description: 'Focus search from anywhere when you are not typing into a field.',
+    keys: ['/'],
+  },
+  {
+    title: 'Open settings',
+    description: 'Jump straight to the Settings screen.',
+    keys: ['Ctrl/Cmd', ','],
+  },
+  {
+    title: 'Go to Catalog',
+    description: 'Open the main plugin catalog view.',
+    keys: ['Alt', '1'],
+  },
+  {
+    title: 'Go to Installed',
+    description: 'Open the installed plugins view.',
+    keys: ['Alt', '2'],
+  },
+  {
+    title: 'Go to Updates',
+    description: 'Open the updates view.',
+    keys: ['Alt', '3'],
+  },
+  {
+    title: 'Go to Settings',
+    description: 'Open this page directly from anywhere in the app shell.',
+    keys: ['Alt', '4'],
+  },
+  {
+    title: 'Clear search or close a finished install modal',
+    description: 'Clear the active search first, then blur it. Also dismisses a safe install modal state.',
+    keys: ['Esc'],
+  },
+]
 
 function getDefaultPreferences(isGlobalInstallTarget: boolean): AppSettings {
   return {
@@ -161,6 +206,37 @@ export function SettingsPage() {
         </header>
 
         <div className="space-y-12">
+          <SettingSection
+            icon={<Keyboard className="size-5" />}
+            title="Keyboard Shortcuts"
+          >
+            <div className="rounded-[24px] border border-white/10 bg-white/[0.04] p-6">
+              <div className="grid gap-3">
+                {keyboardShortcuts.map((shortcut) => (
+                  <div
+                    className="flex flex-col gap-3 rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-4 md:flex-row md:items-center md:justify-between"
+                    key={shortcut.title}
+                  >
+                    <div className="min-w-0">
+                      <p className="font-semibold text-white">{shortcut.title}</p>
+                      <p className="mt-1 text-sm leading-6 text-slate-400">
+                        {shortcut.description}
+                      </p>
+                    </div>
+                    <ShortcutHint
+                      className="shrink-0 text-slate-400"
+                      keyClassName="bg-white/[0.05] text-slate-200"
+                      keys={shortcut.keys}
+                    />
+                  </div>
+                ))}
+              </div>
+              <p className="mt-4 text-xs leading-6 text-slate-500">
+                Shortcut handlers ignore active text inputs except the explicit search shortcuts.
+              </p>
+            </div>
+          </SettingSection>
+
           <SettingSection
             icon={<Settings2 className="size-5" />}
             title="General Settings"

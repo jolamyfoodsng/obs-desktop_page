@@ -194,11 +194,11 @@ jobs:
           tag_name: ${{ steps.metadata.outputs.release_tag }}
           target_commitish: ${{ github.sha }}
           name: ${{ steps.metadata.outputs.release_name }}
-          prerelease: true
-          make_latest: false
+          prerelease: false
+          make_latest: true
           generate_release_notes: false
           body: |
-            Automated desktop prerelease from `main`.
+            Automated desktop release from `main`.
 
             Version: `${{ steps.metadata.outputs.app_version }}`
             Commit: `${{ github.sha }}`

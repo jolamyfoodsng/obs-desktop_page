@@ -5,7 +5,7 @@ import {
   resolveUpdateCatalog,
   sendError,
   sendJson,
-} from './_lib/update-server'
+} from './_lib/update-server.js'
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
   if (request.method !== 'GET') {

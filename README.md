@@ -200,7 +200,7 @@ This repository includes a GitHub Actions workflow at `.github/workflows/release
 
 - Every push to GitHub now triggers the workflow automatically.
 - Push builds run on GitHub-hosted `windows-latest`, `ubuntu-latest`, and `macos-latest` runners.
-- Pushes to `main` also publish a new GitHub prerelease automatically after all platform builds succeed.
+- Pushes to `main` also publish a new GitHub release automatically after all platform builds succeed.
 - Other branch pushes upload the compiled desktop bundles as GitHub Actions run artifacts.
 - Pushing a version tag like `v0.2.0` triggers a release build and creates or updates the GitHub Release automatically.
 - `workflow_dispatch` is also enabled so you can test the workflow manually from the Actions tab.
@@ -220,7 +220,7 @@ For every push and version-tag push, GitHub Actions:
 - builds Tauri release bundles
 - generates updater signatures because `bundle.createUpdaterArtifacts` is enabled
 - uploads installer artifacts and `.sig` files to the workflow run on normal branch pushes
-- creates a new prerelease entry after successful `main` builds using the current app version and GitHub Actions run number
+- creates a new release entry after successful `main` builds using the current app version and GitHub Actions run number
 - uploads both installer artifacts and `.sig` files to a GitHub Release automatically when the pushed ref is a version tag like `v0.2.0`
 
 ### Simple version bump flow
@@ -327,7 +327,7 @@ This implementation intentionally ignores source-code archives when installable 
 ### Push builds vs release builds
 
 - On a normal `git push` to a non-`main` branch, the workflow compiles Windows, Linux, and macOS bundles and stores them in the GitHub Actions run under `Artifacts`.
-- On a `git push` to `main`, the workflow compiles Windows, Linux, and macOS bundles, then automatically creates a new prerelease entry for that build.
+- On a `git push` to `main`, the workflow compiles Windows, Linux, and macOS bundles, then automatically creates a new release entry for that build and marks it as the latest release.
 - On a pushed version tag like `v0.2.0`, the workflow compiles those bundles and attaches them directly to the GitHub Release page.
 - If signing secrets are not configured yet, the workflow can still be used for compile verification, but updater signing-dependent release distribution may need those secrets before you ship to users.
 
@@ -381,7 +381,7 @@ git push origin v0.1.0
 4. Wait for the `Desktop Builds` workflow to finish.
 5. Download the generated Windows, Linux, and macOS assets from the release page.
 
-If you do not want to create a versioned tag yet, simply push to `main` and the workflow will publish a new successful prerelease build automatically.
+If you do not want to create a versioned tag yet, simply push to `main` and the workflow will publish a new successful release build automatically.
 
 ## First release checklist
 
@@ -390,7 +390,7 @@ Before the first GitHub release, do these manual steps:
 - create the GitHub repo and push the default branch
 - confirm GitHub Actions are enabled for the repository
 - make the app version consistent across `package.json`, `src-tauri/tauri.conf.json`, and `src-tauri/Cargo.toml`
-- optionally create the first tagged GitHub Release using the same version if you want a permanent versioned release in addition to the automatic `main` prereleases
+- optionally create the first tagged GitHub Release using the same version if you want a permanent versioned release in addition to the automatic `main` build releases
 - optionally update package metadata like repository URL or license later if you want richer public package metadata
 
 ## Local and production testing
