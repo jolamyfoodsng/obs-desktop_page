@@ -97,6 +97,8 @@ jobs:
       - name: Build Tauri release bundles
         run: npm run build:release -- --bundles ${{ matrix.bundles }}
         env:
+          VITE_POSTHOG_PROJECT_KEY: ${{ vars.VITE_POSTHOG_PROJECT_KEY }}
+          VITE_POSTHOG_API_HOST: ${{ vars.VITE_POSTHOG_API_HOST }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_UPDATE_BASE_URL: ${{ vars.TAURI_UPDATE_BASE_URL }}
