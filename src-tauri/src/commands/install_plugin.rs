@@ -1583,6 +1583,25 @@ fn build_rollback_message(base: &str, issues: &[String]) -> String {
     }
 }
 
+fn cancel_after_copy(
+    app: &AppHandle,
+    plugin: &PluginCatalogEntry,
+    outcome: &CopySessionOutcome,
+    token: &Arc<AtomicBool>,
+    message: &str,
+) -> Result<(), InstallResponse> {
+    if !token.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+
+    let issues = rollback_copy_session(outcome);
+    Err(canceled_response(
+        &plugin.id,
+        build_rollback_message(message, &issues),
+        app,
+    ))
+}
+
 fn verify_copy_session(entries: &[CopyEntry]) -> Result<(), Vec<String>> {
     let missing = entries
         .iter()
@@ -2283,6 +2302,15 @@ fn finalize_obs_archive_install(
         Ok(copy_outcome) => copy_outcome,
         Err(response) => return Ok(response),
     };
+    if let Err(response) = cancel_after_copy(
+        app,
+        plugin,
+        &copy_outcome,
+        token,
+        "The install was canceled before verification completed.",
+    ) {
+        return Ok(response);
+    }
     if let Err(missing_files) = verify_copy_session(&entries) {
         let rollback_issues = rollback_copy_session(&copy_outcome);
         return Ok(failure_response(
@@ -2297,6 +2325,15 @@ fn finalize_obs_archive_install(
             ),
             app,
         ));
+    }
+    if let Err(response) = cancel_after_copy(
+        app,
+        plugin,
+        &copy_outcome,
+        token,
+        "The install was canceled before it was finalized.",
+    ) {
+        return Ok(response);
     }
 
     let mut state = load_state(app)?;
@@ -2425,6 +2462,15 @@ fn finalize_standalone_operations_install(
         Ok(copy_outcome) => copy_outcome,
         Err(response) => return Ok(response),
     };
+    if let Err(response) = cancel_after_copy(
+        app,
+        plugin,
+        &copy_outcome,
+        token,
+        "The install was canceled before verification completed.",
+    ) {
+        return Ok(response);
+    }
     if let Err(missing_files) = verify_copy_session(&entries) {
         let rollback_issues = rollback_copy_session(&copy_outcome);
         return Ok(failure_response(
@@ -2439,6 +2485,15 @@ fn finalize_standalone_operations_install(
             ),
             app,
         ));
+    }
+    if let Err(response) = cancel_after_copy(
+        app,
+        plugin,
+        &copy_outcome,
+        token,
+        "The install was canceled before it was finalized.",
+    ) {
+        return Ok(response);
     }
 
     let mut state = load_state(app)?;
@@ -2562,6 +2617,15 @@ fn install_script_file(
         Ok(copy_outcome) => copy_outcome,
         Err(response) => return Ok(response),
     };
+    if let Err(response) = cancel_after_copy(
+        app,
+        plugin,
+        &copy_outcome,
+        token,
+        "The install was canceled before verification completed.",
+    ) {
+        return Ok(response);
+    }
     if let Err(missing_files) = verify_copy_session(&[CopyEntry {
         source: downloaded_file.to_path_buf(),
         target: target_path.clone(),
@@ -2584,6 +2648,15 @@ fn install_script_file(
             ),
             app,
         ));
+    }
+    if let Err(response) = cancel_after_copy(
+        app,
+        plugin,
+        &copy_outcome,
+        token,
+        "The install was canceled before it was finalized.",
+    ) {
+        return Ok(response);
     }
 
     let mut state = load_state(app)?;

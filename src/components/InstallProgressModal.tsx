@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   X,
 } from 'lucide-react'
+import { useState } from 'react'
 
 import type { InstallProgressEvent, InstallResponse } from '../types/desktop'
 import type { PluginCatalogEntry } from '../types/plugin'
@@ -16,7 +17,17 @@ import { ConfirmDialog } from './ui/ConfirmDialog'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { CopyPathField } from './ui/CopyPathField'
-import { useState } from 'react'
+
+type InstallModalState =
+  | 'preparing'
+  | 'downloading'
+  | 'extracting'
+  | 'installing'
+  | 'success'
+  | 'failed'
+  | 'cancelled'
+  | 'review'
+  | 'manual'
 
 interface InstallProgressModalProps {
   plugin?: PluginCatalogEntry
@@ -95,6 +106,45 @@ function ProgressSteps({
   )
 }
 
+function resolveInstallModalState(
+  progress: InstallProgressEvent,
+  lastResponse: InstallResponse | null,
+): InstallModalState {
+  if (progress.stage === 'canceled' || lastResponse?.code === 'CANCELED') {
+    return 'cancelled'
+  }
+
+  if (progress.stage === 'error') {
+    return 'failed'
+  }
+
+  if (progress.stage === 'review' || Boolean(lastResponse?.reviewPlan)) {
+    return 'review'
+  }
+
+  if (progress.stage === 'manual') {
+    return 'manual'
+  }
+
+  if (progress.stage === 'completed' && lastResponse?.success) {
+    return 'success'
+  }
+
+  if (progress.stage === 'preparing') {
+    return 'preparing'
+  }
+
+  if (progress.stage === 'downloading' || progress.stage === 'verifying') {
+    return 'downloading'
+  }
+
+  if (progress.stage === 'extracting' || progress.stage === 'inspecting') {
+    return 'extracting'
+  }
+
+  return 'installing'
+}
+
 export function InstallProgressModal({
   lastResponse,
   onClose,
@@ -113,23 +163,24 @@ export function InstallProgressModal({
     return null
   }
 
+  const installState = resolveInstallModalState(progress, lastResponse)
   const isTerminal = progress.terminal ?? false
-  const isError = progress.stage === 'error'
-  const isCanceled = progress.stage === 'canceled'
-  const isReview = progress.stage === 'review' || Boolean(lastResponse?.reviewPlan)
-  const isManual = progress.stage === 'manual'
-  const isSuccess = progress.stage === 'completed' && !isError && !isCanceled && !isReview && !isManual
+  const isError = installState === 'failed'
+  const isCanceled = installState === 'cancelled'
+  const isReview = installState === 'review'
+  const isManual = installState === 'manual'
+  const isSuccess = installState === 'success'
   const installerStarted = Boolean(lastResponse?.installerStarted)
   const isActiveInstall =
     !isTerminal &&
-    !isError &&
-    !isReview &&
-    !isManual &&
-    progress.stage !== 'completed' &&
-    progress.stage !== 'canceled'
+    installState !== 'success' &&
+    installState !== 'failed' &&
+    installState !== 'cancelled' &&
+    installState !== 'review' &&
+    installState !== 'manual'
   const canCancel = isActiveInstall && Boolean(onCancelInstall)
   const isDownloadPhase =
-    progress.stage === 'preparing' || progress.stage === 'downloading'
+    installState === 'preparing' || installState === 'downloading'
   const cancelLabel = isDownloadPhase ? 'Cancel download' : 'Stop install safely'
   const isScriptInstall = isScriptPlugin(
     plugin,
@@ -149,7 +200,7 @@ export function InstallProgressModal({
     }
 
     if (isCanceled) {
-      return 'Install canceled'
+      return 'Installation canceled'
     }
 
     if (isReview) {
@@ -256,10 +307,15 @@ export function InstallProgressModal({
                 <div className="flex items-start gap-3 rounded-lg border border-amber-400/20 bg-amber-500/10 p-4">
                   <AlertCircle className="mt-0.5 size-5 text-amber-300" />
                   <div>
-                    <p className="text-sm font-semibold text-white">Install canceled</p>
+                    <p className="text-sm font-semibold text-white">Download canceled</p>
                     <p className="mt-1 text-sm leading-7 text-slate-300">
                       Download canceled. No files were installed.
                     </p>
+                    {progress.detail && progress.detail !== 'Download canceled. No files were installed.' ? (
+                      <p className="mt-2 text-sm leading-7 text-slate-400">
+                        {progress.detail}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-2">

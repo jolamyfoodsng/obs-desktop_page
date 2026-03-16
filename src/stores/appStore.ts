@@ -567,10 +567,22 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
 
       if (!response.success) {
         if (response.code === 'CANCELED') {
-          set({
-            lastInstallResponse: null,
+          set((state) => ({
+            lastInstallResponse: response,
             cancelingInstallPluginId: null,
-          })
+            installProgress:
+              state.installProgress?.pluginId === pluginId &&
+              state.installProgress.stage === 'canceled'
+                ? state.installProgress
+                : {
+                    pluginId,
+                    stage: 'canceled',
+                    progress: 100,
+                    message: 'Download canceled',
+                    detail: response.message,
+                    terminal: true,
+                  },
+          }))
           await get().loadApp()
           return response
         }
@@ -754,9 +766,22 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   },
 
   handleInstallProgress(progress) {
-    set({
-      installProgress: progress,
-      cancelingInstallPluginId: progress.terminal ? null : get().cancelingInstallPluginId,
+    set((state) => {
+      if (
+        state.installProgress?.pluginId === progress.pluginId &&
+        state.installProgress.stage === 'canceled' &&
+        state.installProgress.terminal
+      ) {
+        return {
+          installProgress: state.installProgress,
+          cancelingInstallPluginId: null,
+        }
+      }
+
+      return {
+        installProgress: progress,
+        cancelingInstallPluginId: progress.terminal ? null : state.cancelingInstallPluginId,
+      }
     })
   },
 
