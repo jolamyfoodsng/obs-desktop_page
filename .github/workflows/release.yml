@@ -1,6 +1,9 @@
 name: Release
 
 on:
+  push:
+    branches:
+      - '**'
   release:
     types: [published]
   workflow_dispatch:
@@ -82,6 +85,22 @@ jobs:
           TAURI_UPDATE_BASE_URL: ${{ vars.TAURI_UPDATE_BASE_URL }}
           TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
           TAURI_UPDATE_BUNDLE_TYPE: ${{ matrix.default_update_bundle }}
+
+      - name: Upload workflow artifacts
+        if: github.event_name != 'release'
+        uses: actions/upload-artifact@v4
+        with:
+          name: obs-plugin-installer-${{ matrix.platform }}-${{ github.sha }}
+          if-no-files-found: warn
+          path: |
+            src-tauri/target/release/bundle/**/*.exe
+            src-tauri/target/release/bundle/**/*.msi
+            src-tauri/target/release/bundle/**/*.AppImage
+            src-tauri/target/release/bundle/**/*.deb
+            src-tauri/target/release/bundle/**/*.rpm
+            src-tauri/target/release/bundle/**/*.app.tar.gz
+            src-tauri/target/release/bundle/**/*.dmg
+            src-tauri/target/release/bundle/**/*.sig
 
       - name: Upload release artifacts
         if: github.event_name == 'release'
