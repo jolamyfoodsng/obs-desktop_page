@@ -29,11 +29,22 @@ RESOURCE_TYPE_BY_CATEGORY = {
   "Scripts": "script",
   "Tools": "tool",
   "Themes": "theme",
-  "Overlays": "overlay",
-  "Guides": "guide_only",
+  "Overlays": "overlay_pack",
+  "Guides": "guide",
 }
 
 DEFAULT_GITHUB_PLATFORMS = ["windows", "macos", "linux"]
+
+LEGACY_RESOURCE_TYPE_MAP = {
+  "overlay": "overlay_pack",
+  "guide_only": "guide",
+}
+
+LEGACY_INSTALL_TYPE_MAP = {
+  "obs_script": "script_file",
+  "custom_dock_bundle": "dock_bundle",
+  "guide_only": "manual_guide",
+}
 
 
 def github_api_get(path: str) -> dict[str, Any] | list[Any] | None:
@@ -65,6 +76,18 @@ def canonical_display_category(value: str) -> str:
   return value
 
 
+def normalize_resource_install_type(value: str | None) -> str | None:
+  if not value:
+    return None
+  return LEGACY_INSTALL_TYPE_MAP.get(value, value)
+
+
+def normalize_resource_type(value: str | None) -> str | None:
+  if not value:
+    return None
+  return LEGACY_RESOURCE_TYPE_MAP.get(value, value)
+
+
 def infer_resource_type(entry: dict[str, Any], fallback: str | None = None) -> str:
   if fallback:
     return fallback
@@ -86,9 +109,17 @@ def infer_resource_type(entry: dict[str, Any], fallback: str | None = None) -> s
     )
   ).lower()
 
-  if "overlay" in haystack or "browser source" in haystack:
-    return "overlay"
-  return "guide_only"
+  install_type = entry.get("resourceInstallType") or entry.get("installType")
+
+  if install_type == "dock_bundle":
+    return "dock_extension"
+  if install_type == "browser_source_bundle":
+    return "browser_widget"
+  if any(token in haystack for token in ("overlay", "browser source", "lower third", "widget")):
+    return "overlay_pack"
+  if any(token in haystack for token in ("automation", "integration", "connector", "websocket")):
+    return "automation_integration"
+  return "guide"
 
 
 def normalize_url(value: str | None) -> str | None:
@@ -279,7 +310,7 @@ def expand_compact_count(value: str | None) -> int | None:
 
 def enrich_official_entry(entry: dict[str, Any]) -> dict[str, Any]:
   category = canonical_display_category(entry["category"])
-  resource_type = infer_resource_type({**entry, "category": category})
+  resource_type = infer_resource_type({**entry, "category": category}, normalize_resource_type(entry.get("resourceType")))
   official_obs_url = entry["homepageUrl"] if "obsproject.com/forum/resources/" in entry["homepageUrl"] else None
 
   repo = (
@@ -294,24 +325,60 @@ def enrich_official_entry(entry: dict[str, Any]) -> dict[str, Any]:
     or (entry.get("sourceUrl") if "/releases" in (entry.get("sourceUrl") or "") else None)
     or github_release_url(repo)
   )
-  file_type = infer_file_type(entry.get("manualInstallUrl")) or "url"
+  package_type = entry.get("packageType") or infer_file_type(entry.get("manualInstallUrl")) or "unknown"
+  resource_install_type = normalize_resource_install_type(entry.get("resourceInstallType")) or obs_import.infer_resource_install_type(
+    category,
+    package_type,
+    " ".join(
+      filter(
+        None,
+        [
+          entry.get("name"),
+          entry.get("tagline"),
+          entry.get("description"),
+          entry.get("longDescription"),
+        ],
+      )
+    ),
+    [],
+    entry.get("primaryEntryFiles") or [],
+  )
+  install_type = (
+    entry.get("installType")
+    or ("external" if resource_install_type == "external_installer"
+        else "archive" if resource_install_type in {"native_plugin", "script_file", "zip_extract", "browser_source_bundle", "dock_bundle", "theme_bundle"}
+        else "guide")
+  )
 
   entry["category"] = category
   entry["officialObsUrl"] = official_obs_url
   entry["githubUrl"] = github_url
   entry["releaseUrl"] = release_url
   entry["updatedAt"] = entry["lastUpdated"]
-  entry["installType"] = "guide"
-  entry["fileType"] = file_type
-  entry["resourceType"] = resource_type
+  entry["installType"] = install_type
+  entry["packageType"] = package_type
+  entry["fileType"] = entry.get("fileType") or package_type
+  entry["resourceInstallType"] = resource_install_type
+  entry["resourceType"] = normalize_resource_type(resource_type)
   entry["verifiedSource"] = "official-obs"
   entry["downloadCountRaw"] = entry.pop("_downloads", None) or expand_compact_count(entry.get("downloadCount"))
   entry["githubStars"] = None
+  entry["downloadButtonPresent"] = bool(entry.get("downloadButtonPresent") or entry.get("manualInstallUrl"))
+  entry["managedExtractPath"] = entry.get("managedExtractPath") or obs_import.managed_extract_path(
+    entry["id"],
+    resource_install_type,
+  )
+  entry["primaryEntryFiles"] = entry.get("primaryEntryFiles") or []
+  entry["installInstructions"] = entry.get("installInstructions") or []
+  entry["obsFollowupSteps"] = entry.get("obsFollowupSteps") or []
+  entry["setupActions"] = entry.get("setupActions") or []
+  entry["guideOnly"] = entry.get("guideOnly", resource_install_type == "manual_guide")
   entry["searchTags"] = build_search_tags(
     entry["name"],
     entry["author"],
     entry["category"],
     resource_type,
+    resource_install_type,
     entry.get("sourceUrl"),
     entry.get("manualInstallUrl"),
   )
@@ -352,7 +419,7 @@ def build_github_entry(seed: dict[str, Any]) -> dict[str, Any] | None:
   resource_type = seed.get("resourceType") or infer_resource_type(seed)
   category = seed.get("category", "Tools")
   supported_platforms = seed.get("supportedPlatforms") or release_metadata["supportedPlatforms"]
-  if not supported_platforms and resource_type in {"overlay", "tool"}:
+  if not supported_platforms and resource_type in {"overlay_pack", "browser_widget", "dock_extension", "tool"}:
     supported_platforms = DEFAULT_GITHUB_PLATFORMS.copy()
 
   version = (
@@ -372,6 +439,17 @@ def build_github_entry(seed: dict[str, Any]) -> dict[str, Any] | None:
     release_metadata["installType"] in {"archive", "external"}
     and bool(release_metadata["selectedAssetName"])
     and resource_type in {"plugin", "tool"}
+  )
+  resource_install_type = (
+    "native_plugin"
+    if release_metadata["installType"] == "archive" and resource_type == "plugin"
+    else "script_file"
+    if release_metadata["installType"] == "archive" and resource_type in {"script", "automation_integration"}
+    else "external_installer"
+    if release_metadata["installType"] == "external"
+    else "zip_extract"
+    if release_metadata["installType"] == "archive"
+    else "manual_guide"
   )
 
   title = repo.get("description") or repo_name.replace("-", " ").replace("_", " ")
@@ -401,9 +479,11 @@ def build_github_entry(seed: dict[str, Any]) -> dict[str, Any] | None:
     "githubUrl": repo_url,
     "releaseUrl": release_url,
     "updatedAt": last_updated,
+    "resourceInstallType": normalize_resource_install_type(resource_install_type),
     "installType": release_metadata["installType"],
+    "packageType": release_metadata["fileType"],
     "fileType": release_metadata["fileType"],
-    "resourceType": resource_type,
+    "resourceType": normalize_resource_type(resource_type),
     "verifiedSource": "github-vetted",
     "downloadCountRaw": download_count_raw,
     "githubStars": download_count_raw,
@@ -418,7 +498,16 @@ def build_github_entry(seed: dict[str, Any]) -> dict[str, Any] | None:
     "verified": owner.lower() == "obsproject",
     "featured": False,
     "guideOnly": not is_installable_release,
+    "downloadButtonPresent": bool(release_metadata["selectedAssetName"]),
     "manualInstallUrl": release_url or repo_url,
+    "managedExtractPath": obs_import.managed_extract_path(
+      obs_import.slugify(repo_name),
+      resource_install_type,
+    ),
+    "primaryEntryFiles": [],
+    "installInstructions": [],
+    "obsFollowupSteps": [],
+    "setupActions": [],
     "statusNote": "Vetted GitHub source import",
     "lastUpdated": last_updated_date,
     "downloadCount": obs_import.format_compact_count(download_count_raw),
@@ -544,16 +633,68 @@ def count_by_resource_type(entries: list[dict[str, Any]]) -> dict[str, int]:
     "script": 0,
     "tool": 0,
     "theme": 0,
-    "overlay": 0,
-    "guide_only": 0,
+    "browser_widget": 0,
+    "dock_extension": 0,
+    "overlay_pack": 0,
+    "automation_integration": 0,
+    "guide": 0,
   }
 
   for entry in entries:
-    resource_type = entry.get("resourceType") or infer_resource_type(entry)
+    resource_type = normalize_resource_type(entry.get("resourceType")) or infer_resource_type(entry)
     counts.setdefault(resource_type, 0)
     counts[resource_type] += 1
 
   return counts
+
+
+def count_by_install_strategy(entries: list[dict[str, Any]]) -> dict[str, int]:
+  counts: dict[str, int] = {}
+  for entry in entries:
+    strategy = normalize_resource_install_type(entry.get("resourceInstallType")) or "manual_guide"
+    counts[strategy] = counts.get(strategy, 0) + 1
+  return counts
+
+
+def refresh_specific_official_entry(
+  resource_url: str,
+  curated_entries: list[dict[str, Any]],
+  existing_entries: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+  listing = obs_import.find_listing_item_by_url(resource_url)
+  if not listing:
+    raise RuntimeError(f"Could not locate {resource_url} in the OBS resource listings.")
+
+  refreshed = obs_import.build_resource_entry(
+    listing,
+    curated_entries,
+    inspect_downloads=True,
+  )
+  if not refreshed:
+    raise RuntimeError(f"Could not build a normalized entry for {resource_url}.")
+
+  refreshed = enrich_official_entry(refreshed)
+  refreshed_entries: list[dict[str, Any]] = []
+  matched = False
+
+  for entry in existing_entries:
+    entry_url = normalize_url(entry.get("officialObsUrl") or entry.get("homepageUrl"))
+    if entry_url == normalize_url(resource_url):
+      refreshed_entries.append(refreshed)
+      matched = True
+    else:
+      refreshed_entries.append(entry)
+
+  if not matched:
+    refreshed_entries.append(refreshed)
+
+  refreshed_entries.sort(key=lambda entry: entry.get("downloadCountRaw") or 0, reverse=True)
+  return refreshed_entries, {
+    "listingItems": len(existing_entries),
+    "selectedCandidates": 1,
+    "duplicates": 0,
+    "skipped": 0,
+  }
 
 
 def main() -> int:
@@ -565,6 +706,7 @@ def main() -> int:
   parser.add_argument("--resources-path", default="src/data/resources.json")
   parser.add_argument("--seed-path", default="scripts/vetted_obs_github_sources.json")
   parser.add_argument("--refresh-official", action="store_true")
+  parser.add_argument("--resource-url")
   args = parser.parse_args()
 
   repo_root = Path(__file__).resolve().parents[1]
@@ -575,7 +717,14 @@ def main() -> int:
   curated_entries = json.loads(curated_path.read_text())
   github_seeds = json.loads(seed_path.read_text())
 
-  if args.refresh_official:
+  if args.resource_url:
+    existing_official_entries, _ = load_existing_official_entries(resources_path)
+    official_entries, official_stats = refresh_specific_official_entry(
+      resource_url=args.resource_url,
+      curated_entries=curated_entries,
+      existing_entries=existing_official_entries,
+    )
+  elif args.refresh_official:
     official_entries, official_stats = collect_official_entries(
       minimum_age_days=args.minimum_age_days,
       curated_entries=curated_entries,
@@ -583,19 +732,25 @@ def main() -> int:
   else:
     official_entries, official_stats = load_existing_official_entries(resources_path)
 
-  github_candidates = []
-  for seed in github_seeds:
-    github_candidates.append(build_github_entry(seed))
+  if args.resource_url:
+    combined_entries = official_entries
+    github_entries = []
+    github_stats = {"duplicates": 0, "skipped": 0}
+  else:
+    github_candidates = []
+    for seed in github_seeds:
+      github_candidates.append(build_github_entry(seed))
 
-  github_entries, github_stats = append_unique_entries(official_entries, github_candidates)
-  github_entries.sort(key=lambda entry: entry.get("downloadCountRaw") or 0, reverse=True)
+    github_entries, github_stats = append_unique_entries(official_entries, github_candidates)
+    github_entries.sort(key=lambda entry: entry.get("downloadCountRaw") or 0, reverse=True)
 
-  combined_entries = official_entries + github_entries
+    combined_entries = official_entries + github_entries
   resources_path.write_text(
     json.dumps(combined_entries, indent=2, ensure_ascii=False) + "\n"
   )
 
   resource_counts = count_by_resource_type(combined_entries)
+  install_strategy_counts = count_by_install_strategy(combined_entries)
   installable_count = sum(1 for entry in combined_entries if not entry.get("guideOnly", True))
   guide_only_count = sum(1 for entry in combined_entries if entry.get("guideOnly", False))
 
@@ -611,8 +766,19 @@ def main() -> int:
     "scripts": resource_counts.get("script", 0),
     "tools": resource_counts.get("tool", 0),
     "themes": resource_counts.get("theme", 0),
-    "overlays": resource_counts.get("overlay", 0),
-    "guide_only": resource_counts.get("guide_only", 0),
+    "browser_widgets": resource_counts.get("browser_widget", 0),
+    "dock_extensions": resource_counts.get("dock_extension", 0),
+    "overlay_packs": resource_counts.get("overlay_pack", 0),
+    "automation_integrations": resource_counts.get("automation_integration", 0),
+    "guides": resource_counts.get("guide", 0),
+    "native_plugin": install_strategy_counts.get("native_plugin", 0),
+    "script_file": install_strategy_counts.get("script_file", 0),
+    "external_installer": install_strategy_counts.get("external_installer", 0),
+    "zip_extract": install_strategy_counts.get("zip_extract", 0),
+    "browser_source_bundle": install_strategy_counts.get("browser_source_bundle", 0),
+    "dock_bundle": install_strategy_counts.get("dock_bundle", 0),
+    "theme_bundle": install_strategy_counts.get("theme_bundle", 0),
+    "manual_guide": install_strategy_counts.get("manual_guide", 0),
     "officialListingItems": official_stats["listingItems"],
     "officialSelectedCandidates": official_stats["selectedCandidates"],
   }

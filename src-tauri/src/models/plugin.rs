@@ -43,6 +43,26 @@ pub enum PluginInstallStrategyKind {
     Hybrid,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ResourceInstallType {
+    #[serde(rename = "native_plugin")]
+    NativePlugin,
+    #[serde(rename = "script_file", alias = "obs_script")]
+    ScriptFile,
+    #[serde(rename = "external_installer")]
+    ExternalInstaller,
+    #[serde(rename = "zip_extract")]
+    ZipExtract,
+    #[serde(rename = "browser_source_bundle")]
+    BrowserSourceBundle,
+    #[serde(rename = "dock_bundle", alias = "custom_dock_bundle")]
+    DockBundle,
+    #[serde(rename = "theme_bundle")]
+    ThemeBundle,
+    #[serde(rename = "manual_guide", alias = "guide_only")]
+    ManualGuide,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginInstallStrategy {
@@ -53,6 +73,24 @@ pub struct PluginInstallStrategy {
     pub binary_name_hints: Vec<String>,
     #[serde(default)]
     pub resource_dir_hints: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginPrimaryEntryFile {
+    pub role: String,
+    pub label: String,
+    pub relative_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginSetupAction {
+    pub kind: String,
+    pub label: String,
+    pub description: String,
+    #[serde(default)]
+    pub entry_role: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -79,6 +117,38 @@ pub enum PluginPackageFileType {
     AppImage,
     #[serde(rename = "url")]
     Url,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum ResourcePackageType {
+    #[serde(rename = "zip")]
+    Zip,
+    #[serde(rename = "tar.gz")]
+    TarGz,
+    #[serde(rename = "tar.xz")]
+    TarXz,
+    #[serde(rename = "exe")]
+    Exe,
+    #[serde(rename = "msi")]
+    Msi,
+    #[serde(rename = "pkg")]
+    Pkg,
+    #[serde(rename = "dmg")]
+    Dmg,
+    #[serde(rename = "deb")]
+    Deb,
+    #[serde(rename = "rpm")]
+    Rpm,
+    #[serde(rename = "appimage")]
+    AppImage,
+    #[serde(rename = "url")]
+    Url,
+    #[serde(rename = "py")]
+    Py,
+    #[serde(rename = "lua")]
+    Lua,
+    #[serde(rename = "unknown")]
+    Unknown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,7 +194,11 @@ pub struct PluginCatalogEntry {
     pub github_release_url: Option<String>,
     pub github_release_tag: Option<String>,
     pub updated_at: Option<String>,
+    #[serde(default)]
+    pub resource_install_type: Option<ResourceInstallType>,
     pub install_type: Option<String>,
+    #[serde(default)]
+    pub package_type: Option<ResourcePackageType>,
     pub file_type: Option<String>,
     pub resource_type: Option<String>,
     pub verified_source: Option<String>,
@@ -142,7 +216,19 @@ pub struct PluginCatalogEntry {
     pub verified: bool,
     pub featured: bool,
     pub guide_only: bool,
+    #[serde(default)]
+    pub download_button_present: bool,
     pub manual_install_url: Option<String>,
+    #[serde(default)]
+    pub managed_extract_path: Option<String>,
+    #[serde(default)]
+    pub primary_entry_files: Vec<PluginPrimaryEntryFile>,
+    #[serde(default)]
+    pub install_instructions: Vec<String>,
+    #[serde(default)]
+    pub obs_followup_steps: Vec<String>,
+    #[serde(default)]
+    pub setup_actions: Vec<PluginSetupAction>,
     pub status_note: Option<String>,
     pub last_updated: String,
     pub download_count: String,

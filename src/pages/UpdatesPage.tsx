@@ -1,5 +1,6 @@
-import { ArrowRight, RefreshCw } from 'lucide-react'
+import { ArrowRight, RefreshCw, ShieldCheck } from 'lucide-react'
 
+import { EmptyState } from '../components/EmptyState'
 import { Button } from '../components/ui/Button'
 import {
   getInstallMethod,
@@ -65,13 +66,11 @@ export function UpdatesPage() {
 
       <section className="space-y-4">
         {updates.length === 0 ? (
-          <div className="rounded-xl border border-white/10 bg-white/[0.03] p-6">
-            <p className="text-[18px] font-semibold text-white">No updates available</p>
-            <p className="mt-1 text-[14px] text-slate-400">
-              Managed plugins are already current, or the remaining installs are external and not
-              eligible for automatic updates yet.
-            </p>
-          </div>
+          <EmptyState
+            description="Managed plugins are already current, or the remaining installs are external and not eligible for automatic updates yet."
+            icon={<ShieldCheck className="size-5" />}
+            title="No updates available"
+          />
         ) : (
           updates.map((plugin) => {
             const installed = installedByPluginId.get(plugin.id)

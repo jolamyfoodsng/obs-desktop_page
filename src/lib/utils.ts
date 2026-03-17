@@ -8,7 +8,9 @@ import type {
 } from '../types/desktop'
 import type {
   PluginCatalogEntry,
+  PluginPrimaryEntryFile,
   PluginPackage,
+  ResourceInstallType,
   SupportedPlatform,
 } from '../types/plugin'
 
@@ -71,12 +73,55 @@ export function formatSupportedPlatforms(platforms: string[]) {
   return platforms.map(platformLabel).join(', ')
 }
 
+export function toFileUrlPath(absolutePath: string) {
+  const normalized = absolutePath.replace(/\\/g, '/')
+  const prefixed = normalized.startsWith('/') ? normalized : `/${normalized}`
+  return encodeURI(`file://${prefixed}`)
+}
+
+export function resolvePrimaryEntryFiles(
+  plugin?: PluginCatalogEntry | null,
+  installedPlugin?: Pick<InstalledPluginRecord, 'installLocation'> | null,
+) {
+  if (!plugin || !installedPlugin?.installLocation || !plugin.primaryEntryFiles?.length) {
+    return [] as Array<PluginPrimaryEntryFile & { absolutePath: string; fileUrl: string }>
+  }
+
+  const basePath = installedPlugin.installLocation.replace(/[\\/]+$/, '')
+
+  return plugin.primaryEntryFiles.map((entry) => {
+    const relativePath = entry.relativePath.replace(/^[/\\]+/, '').replace(/\\/g, '/')
+    const absolutePath = `${basePath}/${relativePath}`.replace(/\/+/g, '/')
+
+    return {
+      ...entry,
+      absolutePath,
+      fileUrl: toFileUrlPath(absolutePath),
+    }
+  })
+}
+
 export function getPluginTypeLabel(
   plugin?: PluginCatalogEntry | null,
   installedPlugin?: Pick<InstalledPluginRecord, 'sourceType'> | null,
   assetName?: string | null,
 ) {
-  return isScriptPlugin(plugin, installedPlugin, assetName) ? 'OBS Script' : 'OBS Plugin'
+  if (isScriptPlugin(plugin, installedPlugin, assetName)) {
+    return 'OBS Script'
+  }
+
+  switch (plugin?.resourceInstallType) {
+    case 'dock_bundle':
+      return 'Dock Extension'
+    case 'browser_source_bundle':
+      return 'Browser Widget'
+    case 'theme_bundle':
+      return 'Theme Bundle'
+    case 'zip_extract':
+      return 'Tool Bundle'
+    default:
+      return 'OBS Plugin'
+  }
 }
 
 export function normalizePlatform(platform: string): SupportedPlatform {
@@ -138,11 +183,29 @@ export function getGitHubReleasesUrl(plugin: PluginCatalogEntry) {
   return candidates.find((url) => isGitHubUrl(url) && url?.includes('/releases')) ?? null
 }
 
+function isOfficialObsResourceUrl(url?: string | null) {
+  return Boolean(url && /^https?:\/\/obsproject\.com\/forum\/resources\//i.test(url))
+}
+
+export function hasOfficialObsResourceSource(plugin: PluginCatalogEntry) {
+  return [plugin.manualInstallUrl, plugin.officialObsUrl, plugin.homepageUrl].some(
+    isOfficialObsResourceUrl,
+  )
+}
+
 export function hasGitHubReleaseSource(plugin: PluginCatalogEntry) {
   return Boolean(getGitHubRepoUrl(plugin) || getGitHubReleasesUrl(plugin))
 }
 
 export function canAttemptManagedInstall(plugin: PluginCatalogEntry) {
+  if (
+    plugin.resourceInstallType &&
+    plugin.resourceInstallType !== 'manual_guide' &&
+    plugin.resourceInstallType !== 'external_installer'
+  ) {
+    return true
+  }
+
   return Boolean(
     plugin.manualInstallUrl ||
       plugin.packages.length > 0 ||
@@ -203,6 +266,7 @@ export function isScriptPlugin(
 
   return (
     plugin.category.toLowerCase() === 'scripts' ||
+    plugin.resourceInstallType === 'script_file' ||
     /\b(lua|python)\s+script\b/.test(haystack) ||
     /\bobs\s+script\b/.test(haystack) ||
     /\bscript plugin\b/.test(haystack) ||
@@ -253,7 +317,7 @@ export function getInstallOwnershipLabel(
     case 'managed':
       return 'Installed by OBS Plugin Installer'
     case 'installer':
-      return 'Installed using plugin installer'
+      return 'Installed with OBS Plugin Installer'
     case 'external':
       return 'Installed externally'
     default:
@@ -294,6 +358,27 @@ function unsupportedActionLabel(
   return `Not available for ${platformLabel(normalizedPlatform)}`
 }
 
+function resourceInstallTypeLabel(resourceInstallType?: ResourceInstallType | null) {
+  switch (resourceInstallType) {
+    case 'native_plugin':
+      return 'OBS plugin package'
+    case 'script_file':
+      return 'OBS Script'
+    case 'external_installer':
+      return 'Guided installer'
+    case 'zip_extract':
+      return 'Extracted bundle'
+    case 'browser_source_bundle':
+      return 'Browser source bundle'
+    case 'dock_bundle':
+      return 'Dock bundle'
+    case 'theme_bundle':
+      return 'Theme bundle'
+    default:
+      return 'Guide-only resource'
+  }
+}
+
 export interface PluginCompatibility {
   label: string
   tone: 'neutral' | 'primary' | 'success' | 'warning' | 'danger'
@@ -320,6 +405,8 @@ export function getPluginCompatibility(
     plugin.supportedPlatforms.includes(normalizedPlatform)
   const hasRuntimeStrategy = Boolean(plugin.installStrategy) || isScriptPlugin(plugin)
   const hasReleaseSource = hasGitHubReleaseSource(plugin)
+  const hasOfficialResourceSource = hasOfficialObsResourceSource(plugin)
+  const resourceInstallType = plugin.resourceInstallType ?? null
 
   if (!metadataSupportsPlatform) {
     return {
@@ -371,13 +458,41 @@ export function getPluginCompatibility(
 
   if (hasRuntimeStrategy) {
     return {
-      label: isScriptPlugin(plugin) ? 'OBS Script' : 'Managed resource import',
+      label: resourceInstallTypeLabel(resourceInstallType),
       tone: plugin.guideOnly ? 'warning' : 'neutral',
       canInstall: true,
       isGuided: plugin.guideOnly,
-      reason: isScriptPlugin(plugin)
-        ? `This resource installs as an OBS script on ${platformLabel(normalizedPlatform)}.`
-        : `This resource has a managed install strategy for ${platformLabel(normalizedPlatform)}.`,
+      reason:
+        resourceInstallType === 'dock_bundle'
+          ? `This resource installs as a managed dock bundle on ${platformLabel(normalizedPlatform)} and then requires follow-up setup in OBS.`
+          : resourceInstallType === 'browser_source_bundle'
+            ? `This resource installs as a managed browser-source bundle on ${platformLabel(normalizedPlatform)} and then requires follow-up setup in OBS.`
+            : resourceInstallType === 'theme_bundle'
+              ? `This resource installs as a managed theme bundle on ${platformLabel(normalizedPlatform)}.`
+              : resourceInstallType === 'zip_extract'
+                ? `This resource installs by extracting its bundle into the managed tools library on ${platformLabel(normalizedPlatform)}.`
+                : isScriptPlugin(plugin)
+                ? `This resource installs as an OBS script on ${platformLabel(normalizedPlatform)}.`
+                : `This resource has a managed install strategy for ${platformLabel(normalizedPlatform)}.`,
+      disabledActionLabel: '',
+      canViewSource: true,
+      requiresReleaseCheck: false,
+    }
+  }
+
+  if (hasOfficialResourceSource) {
+    return {
+      label:
+        resourceInstallType && resourceInstallType !== 'manual_guide'
+          ? resourceInstallTypeLabel(resourceInstallType)
+          : 'Official OBS download',
+      tone: 'neutral',
+      canInstall: true,
+      isGuided: false,
+      reason:
+        resourceInstallType && resourceInstallType !== 'manual_guide'
+          ? `OBS Plugin Installer can attempt the official OBS resource download and handle it as a ${resourceInstallTypeLabel(resourceInstallType).toLowerCase()} on ${platformLabel(normalizedPlatform)}.`
+          : `OBS Plugin Installer can attempt the official OBS resource download for ${platformLabel(normalizedPlatform)}.`,
       disabledActionLabel: '',
       canViewSource: true,
       requiresReleaseCheck: false,

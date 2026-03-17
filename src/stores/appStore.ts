@@ -100,6 +100,15 @@ interface AppStoreState {
   dismissedAppUpdateVersion: string | null
   installProgress: InstallProgressEvent | null
   lastInstallResponse: InstallResponse | null
+  lastInstallRequest: {
+    pluginId: string
+    options?: {
+      packageId?: string | null
+      overwrite?: boolean
+      githubAssetName?: string | null
+      githubAssetUrl?: string | null
+    }
+  } | null
   loadApp: () => Promise<void>
   checkForAppUpdate: (options?: { silent?: boolean; forcePrompt?: boolean }) => Promise<AppUpdateSnapshot | undefined>
   downloadAppUpdate: () => Promise<AppUpdateSnapshot | undefined>
@@ -122,6 +131,7 @@ interface AppStoreState {
       githubAssetUrl?: string | null
     },
   ) => Promise<InstallResponse | undefined>
+  retryLastInstall: () => Promise<InstallResponse | undefined>
   cancelInstall: (pluginId: string) => Promise<void>
   adoptInstallation: (pluginId: string) => Promise<void>
   uninstallPlugin: (pluginId: string) => Promise<UninstallResponse | undefined>
@@ -158,6 +168,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   dismissedAppUpdateVersion: readDismissedAppUpdateVersion(),
   installProgress: null,
   lastInstallResponse: null,
+  lastInstallRequest: null,
 
   async loadApp() {
     if (bootstrapRequest) {
@@ -514,6 +525,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
         dismissedAppUpdateVersion: null,
         installProgress: null,
         lastInstallResponse: null,
+        lastInstallRequest: null,
         cancelingInstallPluginId: null,
       })
       window.localStorage.setItem(CATALOG_VIEW_MODE_STORAGE_KEY, 'list')
@@ -540,6 +552,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
         detail: 'Starting plugin install workflow.',
       },
       lastInstallResponse: null,
+      lastInstallRequest: { pluginId, options },
       cancelingInstallPluginId: null,
     })
     trackEvent(
@@ -675,6 +688,15 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     }
   },
 
+  async retryLastInstall() {
+    const request = get().lastInstallRequest
+    if (!request) {
+      return undefined
+    }
+
+    return get().installPlugin(request.pluginId, request.options)
+  },
+
   async cancelInstall(pluginId) {
     set({ cancelingInstallPluginId: pluginId })
 
@@ -761,6 +783,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     set({
       installProgress: null,
       lastInstallResponse: null,
+      lastInstallRequest: null,
       cancelingInstallPluginId: null,
     })
   },

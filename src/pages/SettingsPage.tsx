@@ -25,13 +25,13 @@ import type { AppSettings } from '../types/desktop'
 
 const keyboardShortcuts = [
   {
-    title: 'Focus search',
-    description: 'Jump to the catalog search field and select the current text.',
+    title: 'Open command palette',
+    description: 'Search plugins, navigation, and commands from anywhere in the app shell.',
     keys: ['Ctrl/Cmd', 'K'],
   },
   {
     title: 'Quick search',
-    description: 'Focus search from anywhere when you are not typing into a field.',
+    description: 'Open the command palette when you are not typing into a field.',
     keys: ['/'],
   },
   {
@@ -40,28 +40,33 @@ const keyboardShortcuts = [
     keys: ['Ctrl/Cmd', ','],
   },
   {
-    title: 'Go to Catalog',
-    description: 'Open the main plugin catalog view.',
+    title: 'Go to Dashboard',
+    description: 'Open the system dashboard.',
     keys: ['Alt', '1'],
+  },
+  {
+    title: 'Go to Plugins',
+    description: 'Open the main plugin catalog view.',
+    keys: ['Alt', '2'],
   },
   {
     title: 'Go to Installed',
     description: 'Open the installed plugins view.',
-    keys: ['Alt', '2'],
+    keys: ['Alt', '3'],
   },
   {
     title: 'Go to Updates',
     description: 'Open the updates view.',
-    keys: ['Alt', '3'],
+    keys: ['Alt', '4'],
   },
   {
     title: 'Go to Settings',
     description: 'Open this page directly from anywhere in the app shell.',
-    keys: ['Alt', '4'],
+    keys: ['Alt', '5'],
   },
   {
-    title: 'Clear search or close a finished install modal',
-    description: 'Clear the active search first, then blur it. Also dismisses a safe install modal state.',
+    title: 'Close command palette or finished install modal',
+    description: 'Dismiss the command palette or a safe install modal state.',
     keys: ['Esc'],
   },
 ]

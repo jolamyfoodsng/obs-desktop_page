@@ -1,6 +1,8 @@
 import { useDeferredValue, useState } from 'react'
-import { ExternalLink, FolderOpen, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react'
+import { ExternalLink, FolderOpen, PackageOpen, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 
+import { EmptyState } from '../components/EmptyState'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
@@ -14,10 +16,12 @@ import {
   hasGitHubReleaseSource,
   isScriptPlugin,
   isUpdateAvailable,
+  resolvePrimaryEntryFiles,
 } from '../lib/utils'
 import { useAppStore } from '../stores/appStore'
 
 export function InstalledPage() {
+  const navigate = useNavigate()
   const bootstrap = useAppStore((state) => state.bootstrap)
   const currentPlatform = bootstrap?.currentPlatform ?? 'windows'
   const developerMode = bootstrap?.settings.developerMode ?? false
@@ -89,11 +93,17 @@ export function InstalledPage() {
 
         <section className="overflow-hidden rounded-[32px] border border-white/10 bg-white/[0.04] shadow-panel">
           {installedRows.length === 0 ? (
-            <div className="p-10">
-              <h3 className="text-xl font-semibold text-white">No plugins installed yet</h3>
-              <p className="mt-3 max-w-2xl text-sm leading-7 text-slate-400">
-                Installed plugins appear here after they go through OBS Plugin Installer. Guided vendor installers are tracked too, but they stay clearly marked until you finish the external flow.
-              </p>
+            <div className="p-6">
+              <EmptyState
+                description="Installed resources appear here after OBS Plugin Installer manages them or adopts an existing OBS installation."
+                icon={<PackageOpen className="size-5" />}
+                primaryAction={{
+                  label: 'Browse plugins',
+                  onClick: () => navigate('/plugins'),
+                  variant: 'primary',
+                }}
+                title="No installed plugins"
+              />
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -129,6 +139,7 @@ export function InstalledPage() {
                     const isScriptEntry = isScriptPlugin(plugin, installedPlugin)
                     const isStandaloneTool =
                       installedPlugin.sourceType === 'standalone-tool'
+                    const resolvedEntryFiles = resolvePrimaryEntryFiles(plugin, installedPlugin)
                     const canDelete =
                       isManagedInstall &&
                       (installedPlugin.installedFiles.length > 0 ||
@@ -178,6 +189,13 @@ export function InstalledPage() {
                                 value={installedPlugin.downloadPath}
                               />
                             ) : null}
+                            {!isScriptEntry && resolvedEntryFiles.length ? (
+                              <CopyPathField
+                                buttonClassName="h-7 w-7"
+                                codeClassName="rounded-md px-2 py-1 text-[11px] leading-5"
+                                value={resolvedEntryFiles[0].absolutePath}
+                              />
+                            ) : null}
                             {developerMode ? (
                               <p className="break-all text-[11px] leading-5 text-slate-500">
                                 {installedPlugin.sourceType} • {installedPlugin.installLocation}
@@ -196,12 +214,14 @@ export function InstalledPage() {
                             <Badge tone="danger">Files missing</Badge>
                           ) : isScriptAttachPending ? (
                             <Badge tone="warning">Needs OBS attach</Badge>
+                          ) : installedPlugin.status === 'manual-step' && isStandaloneTool ? (
+                            <Badge tone="warning">Setup in OBS</Badge>
                           ) : installedPlugin.status === 'manual-step' ? (
                             <Badge tone="warning">Installer pending</Badge>
                           ) : hasUpdate ? (
                             <Badge tone="warning">Update available</Badge>
                           ) : isInstallerInstall ? (
-                            <Badge tone="neutral">Installed using plugin installer</Badge>
+                            <Badge tone="neutral">{getInstallOwnershipLabel(installedPlugin)}</Badge>
                           ) : isStandaloneTool ? (
                             <Badge tone="neutral">Tool installed</Badge>
                           ) : (
@@ -240,20 +260,29 @@ export function InstalledPage() {
                                 disabled={!compatibility.canInstall}
                                 size="sm"
                                 variant={hasUpdate ? 'primary' : 'secondary'}
-                                onClick={() =>
+                                onClick={() => {
+                                  if (installedPlugin.status === 'manual-step' && isStandaloneTool) {
+                                    void revealPath(installedPlugin.installLocation)
+                                    return
+                                  }
+
                                   void installPlugin(plugin.id, {
                                     overwrite: true,
                                     packageId: hasGitHubReleaseSource(plugin)
                                       ? null
                                       : recommendedPackage?.id ?? null,
                                   })
-                                }
+                                }}
                               >
                                 <RefreshCw className="size-4" />
                                 {installedPlugin.status === 'manual-step'
-                                  ? 'Retry'
+                                  ? isStandaloneTool
+                                    ? 'Open setup'
+                                    : 'Retry'
                                   : hasUpdate
                                     ? 'Update'
+                                    : isInstallerInstall
+                                      ? 'Download again'
                                     : isStandaloneTool
                                       ? 'Reinstall'
                                       : 'Repair'}

@@ -1,6 +1,8 @@
 import { useDeferredValue, useEffect, useRef } from 'react'
+import { SearchX } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
+import { EmptyState } from '../components/EmptyState'
 import { PluginCard } from '../components/PluginCard'
 import { Badge } from '../components/ui/Badge'
 import { getAnalyticsContext, trackEvent } from '../lib/analytics'
@@ -13,6 +15,7 @@ export function DiscoverPage() {
   const bootstrap = useAppStore((state) => state.bootstrap)
   const currentPlatform = bootstrap?.currentPlatform ?? 'windows'
   const searchQuery = useAppStore((state) => state.searchQuery)
+  const setSearchQuery = useAppStore((state) => state.setSearchQuery)
   const selectedCategory = useAppStore((state) => state.selectedCategory)
   const setSelectedCategory = useAppStore((state) => state.setSelectedCategory)
   const catalogViewMode = useAppStore((state) => state.catalogViewMode)
@@ -211,13 +214,43 @@ export function DiscoverPage() {
         }
       >
         {filteredPlugins.length === 0 ? (
-          <div className="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-6">
-            <h2 className="text-[18px] font-semibold text-white">No plugins matched</h2>
-            <p className="mt-1 text-[14px] text-slate-400">
-              Try a different search or switch filters. Unsupported resources stay visible in
-              the catalog when you choose the All filter.
-            </p>
-          </div>
+          <EmptyState
+            description={
+              deferredSearch.length > 0 ? (
+                <>
+                  We couldn’t find anything matching{' '}
+                  <span className="font-medium text-primary">“{searchQuery.trim()}”</span>.
+                </>
+              ) : (
+                'No resources match the current catalog filter.'
+              )
+            }
+            icon={<SearchX className="size-5" />}
+            primaryAction={
+              deferredSearch.length > 0
+                ? {
+                    label: 'Clear search',
+                    onClick: () => setSearchQuery(''),
+                    variant: 'secondary',
+                  }
+                : undefined
+            }
+            secondaryAction={
+              selectedCategory !== 'All'
+                ? {
+                    label: 'Browse all',
+                    onClick: () => setSelectedCategory('All'),
+                    variant: 'outline',
+                  }
+                : undefined
+            }
+            suggestions={[
+              'Try a broader search',
+              'Check spelling',
+              'Browse categories',
+            ]}
+            title="No results found"
+          />
         ) : (
           filteredPlugins.map((plugin) => (
             <PluginCard

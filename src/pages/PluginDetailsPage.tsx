@@ -29,6 +29,7 @@ import {
   getRecommendedPackage,
   hasGitHubReleaseSource,
   isScriptPlugin,
+  resolvePrimaryEntryFiles,
 } from '../lib/utils'
 import { useAppStore } from '../stores/appStore'
 import type { GitHubReleaseInfo } from '../types/desktop'
@@ -170,6 +171,7 @@ export function PluginDetailsPage() {
     null
   const isScriptEntry = isScriptPlugin(plugin, installedPlugin, selectedGitHubAsset?.name)
   const pluginTypeLabel = getPluginTypeLabel(plugin, installedPlugin, selectedGitHubAsset?.name)
+  const resolvedEntryFiles = resolvePrimaryEntryFiles(plugin, installedPlugin)
   const releaseCheckPending =
     isReleaseLoading &&
     !recommendedPackage &&
@@ -181,6 +183,8 @@ export function PluginDetailsPage() {
   const isInstalledExternal = pluginState === 'installed-externally'
   const isInstallerInstall = installMethod === 'installer'
   const isUpdateAvailable = pluginState === 'update-available'
+  const shouldShowInstallerAction =
+    canInstall && isInstallerInstall && isInstalledManaged && !isUpdateAvailable
   const sourcePage =
     activePlugin.sourceUrl ??
     activePlugin.manualInstallUrl ??
@@ -229,7 +233,7 @@ export function PluginDetailsPage() {
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <Badge tone={pluginTypeLabel === 'OBS Script' ? 'script' : 'neutral'}>
-                      {pluginTypeLabel === 'OBS Script' ? 'OBS Script' : plugin.category}
+                      {pluginTypeLabel === 'OBS Plugin' ? plugin.category : pluginTypeLabel}
                     </Badge>
                     <Badge tone={compatibility.tone}>{compatibility.label}</Badge>
                     {plugin.verified ? (
@@ -268,6 +272,11 @@ export function PluginDetailsPage() {
                       {adoptingPluginId === plugin.id
                         ? 'Adopting…'
                         : 'Adopt installation'}
+                    </Button>
+                  ) : shouldShowInstallerAction ? (
+                    <Button onClick={handleInstall}>
+                      <Download className="size-4" />
+                      Download again
                     </Button>
                   ) : isInstalledManaged ? (
                     <Badge
@@ -337,6 +346,49 @@ export function PluginDetailsPage() {
                   </p>
                 ) : null}
               </div>
+
+              {plugin.installInstructions?.length ? (
+                <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    Standardized install instructions
+                  </p>
+                  <ul className="mt-3 space-y-2 text-sm leading-7 text-slate-300">
+                    {plugin.installInstructions.map((step) => (
+                      <li key={step}>{step}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {plugin.obsFollowupSteps?.length ? (
+                <div className="mt-4 rounded-lg border border-amber-400/20 bg-amber-500/10 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-200">
+                    OBS follow-up steps
+                  </p>
+                  <ul className="mt-3 space-y-2 text-sm leading-7 text-slate-100">
+                    {plugin.obsFollowupSteps.map((step) => (
+                      <li key={step}>{step}</li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+
+              {resolvedEntryFiles.length ? (
+                <div className="mt-4 rounded-lg border border-white/10 bg-white/[0.03] p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                    Installed entry files
+                  </p>
+                  <div className="mt-3 space-y-3">
+                    {resolvedEntryFiles.map((entry) => (
+                      <div key={entry.role} className="space-y-2">
+                        <p className="text-sm text-slate-300">{entry.label}</p>
+                        <CopyPathField value={entry.absolutePath} />
+                        <CopyPathField value={entry.fileUrl} />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
 
               {(alternatePackages.length > 0 || githubAssets.length > 1) && canInstall ? (
                 <div className="mt-4 flex flex-wrap gap-2">
@@ -416,7 +468,7 @@ export function PluginDetailsPage() {
                 <dt className="text-slate-500">Updated</dt>
                 <dd className="text-right text-slate-300">{formatDisplayDate(plugin.lastUpdated)}</dd>
               </div>
-              {installMethod === 'managed' && installedPlugin ? (
+              {installMethod !== 'external' && installedPlugin ? (
                 <div className="flex items-center justify-between gap-4">
                   <dt className="text-slate-500">Installed</dt>
                   <dd className="text-right text-slate-300">

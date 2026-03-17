@@ -54,6 +54,7 @@ export interface ObsDetectionState {
   platform: string
   storedPath: string | null
   detectedPath: string | null
+  obsVersion?: string | null
   installTargetPath: string | null
   installTargetLabel: string | null
   validationKind: string | null

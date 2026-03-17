@@ -1,6 +1,7 @@
 use reqwest::Client;
 use serde::Deserialize;
 use serde_json::{Map, Value};
+use std::time::Duration;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -76,31 +77,32 @@ pub async fn capture_analytics_event(request: AnalyticsEventRequest) -> Result<(
         payload.insert("timestamp".to_string(), Value::String(timestamp));
     }
 
-    tauri::async_runtime::spawn(async move {
-        let client = match Client::builder().build() {
-            Ok(client) => client,
-            Err(error) => {
-                eprintln!("[analytics] Could not build PostHog client: {}", error);
-                return;
-            }
-        };
+    let client = Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()
+        .map_err(|error| {
+            let message = format!("Could not build PostHog client: {}", error);
+            eprintln!("[analytics] {}", message);
+            message
+        })?;
 
-        let url = format!("{}/capture/", api_host);
-        match client.post(url).json(&payload).send().await {
-            Ok(response) if response.status().is_success() => {}
-            Ok(response) => {
-                let status = response.status();
-                let body = response.text().await.unwrap_or_default();
-                eprintln!(
-                    "[analytics] PostHog rejected event with status {}: {}",
-                    status, body
-                );
-            }
-            Err(error) => {
-                eprintln!("[analytics] Could not send analytics event: {}", error);
-            }
+    let url = format!("{}/capture/", api_host);
+    match client.post(url).json(&payload).send().await {
+        Ok(response) if response.status().is_success() => Ok(()),
+        Ok(response) => {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            let message = format!(
+                "PostHog rejected event with status {}: {}",
+                status, body
+            );
+            eprintln!("[analytics] {}", message);
+            Err(message)
         }
-    });
-
-    Ok(())
+        Err(error) => {
+            let message = format!("Could not send analytics event: {}", error);
+            eprintln!("[analytics] {}", message);
+            Err(message)
+        }
+    }
 }

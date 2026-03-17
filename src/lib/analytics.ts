@@ -30,6 +30,8 @@ let analyticsInitPromise: Promise<void> | null = null
 let activeDistinctId: string | null = null
 let startupEventTracked = false
 let bridgedIdentityDistinctId: string | null = null
+let posthogJsReady = false
+let posthogJsInitAttempted = false
 
 function isAnalyticsConfigured() {
   return (
@@ -131,6 +133,10 @@ function captureWithJs(
   eventName: TrackableEventName,
   properties: Record<string, unknown>,
 ) {
+  if (!posthogJsReady) {
+    return
+  }
+
   try {
     posthog.capture(eventName, {
       ...properties,
@@ -179,16 +185,49 @@ function applyAnalyticsIdentity(userAccountId?: string | null) {
   const distinctId = resolveAnalyticsDistinctId(userAccountId)
   const identityType = userAccountId?.trim() ? 'account' : 'install'
 
-  posthog.identify(distinctId)
-  posthog.register({
-    app_version: APP_VERSION,
-    platform: inferRuntimePlatform(),
-    environment: ANALYTICS_ENVIRONMENT,
-    analytics_identity_type: identityType,
-    install_id: getOrCreateInstallId(),
-  })
-
   activeDistinctId = distinctId
+
+  if (!posthogJsReady) {
+    return
+  }
+
+  try {
+    posthog.identify(distinctId)
+    posthog.register({
+      app_version: APP_VERSION,
+      platform: inferRuntimePlatform(),
+      environment: ANALYTICS_ENVIRONMENT,
+      analytics_identity_type: identityType,
+      install_id: getOrCreateInstallId(),
+    })
+  } catch (error) {
+    posthogJsReady = false
+    console.warn('[analytics] posthog-js identity update failed', error)
+  }
+}
+
+function initializePosthogJs() {
+  if (posthogJsReady || posthogJsInitAttempted) {
+    return
+  }
+
+  posthogJsInitAttempted = true
+
+  try {
+    posthog.init(POSTHOG_PROJECT_KEY, {
+      api_host: POSTHOG_API_HOST,
+      capture_pageview: true,
+      autocapture: true,
+      persistence: 'localStorage',
+      request_batching: false,
+      api_transport: 'fetch',
+      person_profiles: PERSON_PROFILE_MODE,
+    })
+    posthogJsReady = true
+  } catch (error) {
+    posthogJsReady = false
+    console.warn('[analytics] posthog-js init failed; desktop bridge will continue', error)
+  }
 }
 
 async function initializeAnalytics(userAccountId?: string | null) {
@@ -198,32 +237,23 @@ async function initializeAnalytics(userAccountId?: string | null) {
 
   if (!analyticsInitPromise) {
     analyticsInitPromise = Promise.resolve().then(() => {
-      posthog.init(POSTHOG_PROJECT_KEY, {
-        api_host: POSTHOG_API_HOST,
-        capture_pageview: true,
-        autocapture: true,
-        persistence: 'localStorage',
-        request_batching: false,
-        api_transport: 'fetch',
-        person_profiles: PERSON_PROFILE_MODE,
-      })
-      applyAnalyticsIdentity(userAccountId)
+      initializePosthogJs()
     })
   }
 
   await analyticsInitPromise
 
-  const nextDistinctId = resolveAnalyticsDistinctId(userAccountId)
-  if (activeDistinctId !== nextDistinctId) {
-    applyAnalyticsIdentity(userAccountId)
-  }
-
+  applyAnalyticsIdentity(userAccountId)
   await identifyWithDesktopBridge(userAccountId)
 }
 
 scheduleAnalyticsTask(() => initializeAnalytics())
 
 function inferObsVersion(bootstrap?: BootstrapPayload | null) {
+  if (bootstrap?.obsDetection.obsVersion) {
+    return bootstrap.obsDetection.obsVersion
+  }
+
   const message = bootstrap?.obsDetection.message ?? ''
   const matchedVersion = message.match(/(?:OBS(?: Studio)?\s*v?)(\d+(?:\.\d+){0,2})/i)?.[1]
   return matchedVersion ?? 'unknown'

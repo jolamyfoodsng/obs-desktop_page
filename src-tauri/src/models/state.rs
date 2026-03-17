@@ -52,6 +52,8 @@ pub struct ObsDetectionState {
     pub platform: String,
     pub stored_path: Option<String>,
     pub detected_path: Option<String>,
+    #[serde(default)]
+    pub obs_version: Option<String>,
     pub install_target_path: Option<String>,
     pub install_target_label: Option<String>,
     pub validation_kind: Option<String>,

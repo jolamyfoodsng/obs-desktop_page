@@ -4,6 +4,16 @@ export type PluginPackageInstallType = 'archive' | 'external' | 'guide'
 
 export type PluginInstallStrategyKind = 'obs-plugin' | 'standalone-tool' | 'hybrid'
 
+export type ResourceInstallType =
+  | 'native_plugin'
+  | 'script_file'
+  | 'external_installer'
+  | 'zip_extract'
+  | 'browser_source_bundle'
+  | 'dock_bundle'
+  | 'theme_bundle'
+  | 'manual_guide'
+
 export interface PluginInstallStrategy {
   kind?: PluginInstallStrategyKind | null
   moduleNameAliases: string[]
@@ -23,6 +33,21 @@ export type PluginPackageFileType =
   | 'rpm'
   | 'appimage'
   | 'url'
+
+export type ResourcePackageType = PluginPackageFileType | 'py' | 'lua' | 'unknown'
+
+export interface PluginPrimaryEntryFile {
+  role: string
+  label: string
+  relativePath: string
+}
+
+export interface PluginSetupAction {
+  kind: string
+  label: string
+  description: string
+  entryRole?: string | null
+}
 
 export interface PluginPackage {
   id: string
@@ -58,9 +83,21 @@ export interface PluginCatalogEntry {
   githubReleaseUrl?: string | null
   githubReleaseTag?: string | null
   updatedAt?: string | null
+  resourceInstallType?: ResourceInstallType | null
   installType?: string | null
+  packageType?: ResourcePackageType | null
   fileType?: string | null
-  resourceType?: 'plugin' | 'script' | 'tool' | 'theme' | 'overlay' | 'guide_only' | null
+  resourceType?:
+    | 'plugin'
+    | 'script'
+    | 'tool'
+    | 'theme'
+    | 'browser_widget'
+    | 'dock_extension'
+    | 'overlay_pack'
+    | 'automation_integration'
+    | 'guide'
+    | null
   verifiedSource?: string | null
   downloadCountRaw?: number | null
   githubStars?: number | null
@@ -74,7 +111,13 @@ export interface PluginCatalogEntry {
   verified: boolean
   featured: boolean
   guideOnly: boolean
+  downloadButtonPresent?: boolean
   manualInstallUrl?: string | null
+  managedExtractPath?: string | null
+  primaryEntryFiles?: PluginPrimaryEntryFile[]
+  installInstructions?: string[]
+  obsFollowupSteps?: string[]
+  setupActions?: PluginSetupAction[]
   statusNote?: string | null
   lastUpdated: string
   downloadCount: string

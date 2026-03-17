@@ -12,11 +12,12 @@ import { useState } from 'react'
 
 import type { InstallProgressEvent, InstallResponse } from '../types/desktop'
 import type { PluginCatalogEntry } from '../types/plugin'
-import { isScriptPlugin } from '../lib/utils'
+import { isScriptPlugin, resolvePrimaryEntryFiles } from '../lib/utils'
 import { ConfirmDialog } from './ui/ConfirmDialog'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
 import { CopyPathField } from './ui/CopyPathField'
+import { InstallErrorPanel } from './InstallErrorPanel'
 
 type InstallModalState =
   | 'preparing'
@@ -39,6 +40,7 @@ interface InstallProgressModalProps {
   onOpenInstallerManually?: () => void
   onOpenSource?: () => void
   onViewPlugin?: () => void
+  onRetryInstall?: () => void
   isCanceling?: boolean
 }
 
@@ -153,6 +155,7 @@ export function InstallProgressModal({
   onOpenInstallerManually,
   onOpenSource,
   onViewPlugin,
+  onRetryInstall,
   plugin,
   progress,
   isCanceling = false,
@@ -193,6 +196,11 @@ export function InstallProgressModal({
         lastResponse.installedPlugin.downloadPath ??
         null)
       : null
+  const resolvedEntryFiles = resolvePrimaryEntryFiles(plugin, lastResponse?.installedPlugin)
+  const hasBundleFollowup =
+    isSuccess &&
+    !isScriptInstall &&
+    Boolean(plugin?.obsFollowupSteps?.length || resolvedEntryFiles.length)
 
   const title = (() => {
     if (isError) {
@@ -293,15 +301,21 @@ export function InstallProgressModal({
         ) : (
           <div className="mt-5 space-y-4">
             {isError ? (
-              <div className="flex items-start gap-3 rounded-lg border border-red-500/20 bg-red-500/10 p-4">
-                <AlertCircle className="mt-0.5 size-5 text-red-300" />
-                <div>
-                  <p className="text-sm font-semibold text-white">The install was stopped safely.</p>
-                  <p className="mt-1 text-sm leading-7 text-slate-300">
-                    {progress.detail ?? progress.message}
-                  </p>
-                </div>
-              </div>
+              <InstallErrorPanel
+                logs={progress.detail ?? progress.message}
+                message={progress.message}
+                onCopyLogs={
+                  progress.detail || progress.message
+                    ? () =>
+                        void navigator.clipboard.writeText(
+                          [progress.message, progress.detail].filter(Boolean).join('\n\n'),
+                        )
+                    : undefined
+                }
+                onReportIssue={onOpenSource}
+                onRetry={onRetryInstall}
+                pluginName={plugin?.name}
+              />
             ) : isCanceled ? (
               <div className="space-y-4">
                 <div className="flex items-start gap-3 rounded-lg border border-amber-400/20 bg-amber-500/10 p-4">
@@ -405,7 +419,36 @@ export function InstallProgressModal({
                     </p>
                   </div>
                 </div>
+                {hasBundleFollowup ? (
+                  <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      OBS setup steps
+                    </p>
+                    <ul className="mt-3 space-y-2 text-sm leading-7 text-slate-300">
+                      {(plugin?.obsFollowupSteps ?? []).map((step) => (
+                        <li key={step}>{step}</li>
+                      ))}
+                    </ul>
+                    {resolvedEntryFiles.length ? (
+                      <div className="mt-4 space-y-3">
+                        {resolvedEntryFiles.map((entry) => (
+                          <div key={entry.role} className="space-y-2">
+                            <p className="text-sm text-slate-300">{entry.label}</p>
+                            <CopyPathField value={entry.absolutePath} />
+                            <CopyPathField value={entry.fileUrl} />
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
                 <div className="flex flex-wrap gap-2">
+                  {onOpenInstallFolder && resolvedEntryFiles.length ? (
+                    <Button variant="secondary" onClick={onOpenInstallFolder}>
+                      <FolderOpen className="size-4" />
+                      Open Installed Folder
+                    </Button>
+                  ) : null}
                   {onViewPlugin ? (
                     <Button variant="outline" onClick={onViewPlugin}>
                       <ArrowRight className="size-4" />

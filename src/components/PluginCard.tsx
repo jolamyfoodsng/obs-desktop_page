@@ -45,6 +45,7 @@ function ActionControl({
   isInstalledManaged,
   isUnavailable,
   isUpdateAvailable,
+  actionLabel,
   onInstall,
   viewMode,
 }: {
@@ -55,10 +56,11 @@ function ActionControl({
   isInstalledManaged: boolean
   isUnavailable: boolean
   isUpdateAvailable: boolean
+  actionLabel: string
   onInstall: () => void
   viewMode: CatalogViewMode
 }) {
-  if (isInstalledManaged) {
+  if (isInstalledManaged && !isInstallerBased && !isUpdateAvailable) {
     return (
       <Badge
         className={cn(
@@ -115,7 +117,7 @@ function ActionControl({
       ) : (
         <>
           <ArrowDownToLine className="size-4" />
-          Install
+          {actionLabel}
         </>
       )}
     </Button>
@@ -140,6 +142,10 @@ export function PluginCard({
   const isInstallerBased = installMethod === 'installer'
   const isInstalledExternal = pluginState === 'installed-externally'
   const isUpdateAvailable = pluginState === 'update-available'
+  const actionLabel =
+    isInstallerBased && isInstalledManaged && !isUpdateAvailable
+      ? 'Download again'
+      : 'Install'
   const isAttachPending =
     installedPlugin?.status === 'manual-step' && installedPlugin.sourceType === 'script'
   const supportedPlatforms =
@@ -162,9 +168,11 @@ export function PluginCard({
   pushMetadataTag(
     pluginTypeLabel === 'OBS Script'
       ? { label: 'OBS Script', tone: 'script', icon: null }
-      : plugin.category
-        ? { label: plugin.category, tone: 'neutral', icon: null }
-        : null,
+      : pluginTypeLabel !== 'OBS Plugin'
+        ? { label: pluginTypeLabel, tone: 'neutral', icon: null }
+        : plugin.category
+          ? { label: plugin.category, tone: 'neutral', icon: null }
+          : null,
   )
 
   pushMetadataTag(
@@ -240,13 +248,13 @@ export function PluginCard({
           <span className="truncate text-[12px] text-slate-500">
             {isInstalledExternal
               ? 'Detected in OBS folders'
-              : isInstallerBased
-                ? 'Installed using plugin installer'
-              : isUpdateAvailable
-                ? 'Update ready'
-                : isInstalledManaged
-                  ? getInstallOwnershipLabel(installedPlugin)
-                  : compatibility.label}
+              : isInstallerBased && isInstalledManaged
+                ? getInstallOwnershipLabel(installedPlugin)
+                : isUpdateAvailable
+                  ? 'Update ready'
+                  : isInstalledManaged
+                    ? getInstallOwnershipLabel(installedPlugin)
+                    : compatibility.label}
           </span>
           <div className="w-[132px] shrink-0">
             <ActionControl
@@ -257,6 +265,7 @@ export function PluginCard({
               isInstalledManaged={isInstalledManaged}
               isUnavailable={isUnavailable}
               isUpdateAvailable={isUpdateAvailable}
+              actionLabel={actionLabel}
               onInstall={handleInstall}
               viewMode="grid"
             />
@@ -306,7 +315,7 @@ export function PluginCard({
             </Badge>
           ))}
           {isAttachPending ? <Badge tone="warning">Needs OBS attach</Badge> : null}
-          {isInstallerBased ? <Badge tone="neutral">Plugin installer</Badge> : null}
+          {isInstallerBased ? <Badge tone="neutral">Installer-based</Badge> : null}
         </div>
       </div>
 
@@ -319,6 +328,7 @@ export function PluginCard({
           isInstalledManaged={isInstalledManaged}
           isUnavailable={isUnavailable}
           isUpdateAvailable={isUpdateAvailable}
+          actionLabel={actionLabel}
           onInstall={handleInstall}
           viewMode="list"
         />

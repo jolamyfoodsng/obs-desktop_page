@@ -25,7 +25,7 @@ use crate::commands::store::{load_state, push_install_history, save_state};
 use crate::commands::validate_obs::validate_obs_path;
 use crate::models::plugin::{
     PluginCatalogEntry, PluginPackage, PluginPackageFileType, PluginPackageInstallType,
-    SupportedPlatform,
+    ResourceInstallType, SupportedPlatform,
 };
 use crate::models::state::{
     CancelInstallResponse, GitHubRejectedAsset, GitHubReleaseAssetOption, GitHubReleaseInfo,
@@ -1328,6 +1328,57 @@ fn ensure_managed_tools_directory(app: &AppHandle) -> Result<PathBuf, AppError> 
     Ok(tools_dir)
 }
 
+fn requires_post_install_setup(plugin: &PluginCatalogEntry) -> bool {
+    !plugin.obs_followup_steps.is_empty()
+        || matches!(
+            plugin.resource_install_type,
+            Some(ResourceInstallType::BrowserSourceBundle)
+                | Some(ResourceInstallType::DockBundle)
+                | Some(ResourceInstallType::ThemeBundle)
+                | Some(ResourceInstallType::ZipExtract)
+        )
+}
+
+fn resolve_primary_entry_paths(plugin: &PluginCatalogEntry, install_root: &Path) -> Vec<String> {
+    plugin
+        .primary_entry_files
+        .iter()
+        .map(|entry| install_root.join(&entry.relative_path).display().to_string())
+        .collect()
+}
+
+fn build_followup_install_message(plugin: &PluginCatalogEntry, install_root: &Path) -> String {
+    let entry_paths = resolve_primary_entry_paths(plugin, install_root);
+
+    if plugin.obs_followup_steps.is_empty() {
+        if entry_paths.is_empty() {
+            return format!(
+                "{} was installed into the managed desktop tools library.",
+                plugin.name
+            );
+        }
+
+        return format!(
+            "{} was installed into {}. Review the installed files and complete the OBS setup steps from the plugin details page.",
+            plugin.name,
+            install_root.display()
+        );
+    }
+
+    let file_summary = if entry_paths.is_empty() {
+        String::new()
+    } else {
+        format!(" Key files: {}.", entry_paths.join(" | "))
+    };
+
+    format!(
+        "{} was extracted into {}. Complete the OBS setup steps using the installed files.{}",
+        plugin.name,
+        install_root.display(),
+        file_summary
+    )
+}
+
 fn write_download_response(
     app: &AppHandle,
     plugin_id: &str,
@@ -2450,6 +2501,18 @@ fn finalize_standalone_operations_install(
     package_id: Option<String>,
     token: &Arc<AtomicBool>,
 ) -> Result<InstallResponse, AppError> {
+    let requires_followup = requires_post_install_setup(plugin);
+    let install_status = if requires_followup {
+        InstalledPluginStatus::ManualStep
+    } else {
+        InstalledPluginStatus::Installed
+    };
+    let install_kind = if requires_followup {
+        InstallKind::Guided
+    } else {
+        InstallKind::Full
+    };
+    let success_message = build_followup_install_message(plugin, install_root);
     let entries = collect_copy_entries(&operations, install_root)?;
     let copy_outcome = match copy_entries(
         app,
@@ -2505,9 +2568,9 @@ fn finalize_standalone_operations_install(
         managed: true,
         install_location: install_root.display().to_string(),
         installed_files: copy_outcome.tracked_files.clone(),
-        status: InstalledPluginStatus::Installed,
+        status: install_status,
         source_type: InstalledPluginSourceType::StandaloneTool,
-        install_kind: InstallKind::Full,
+        install_kind,
         package_id,
         download_path: Some(install_root.display().to_string()),
         install_method: Some(InstallMethod::Managed),
@@ -2524,7 +2587,12 @@ fn finalize_standalone_operations_install(
             action: infer_install_history_action(previous_record.as_ref(), &plugin.version),
             managed: true,
             install_location: Some(install_root.display().to_string()),
-            message: "Managed desktop tool install completed and verification passed.".to_string(),
+            message: if requires_followup {
+                "Managed bundle install completed. Follow-up OBS setup is still required."
+                    .to_string()
+            } else {
+                "Managed desktop tool install completed and verification passed.".to_string()
+            },
             timestamp: Utc::now().to_rfc3339(),
             file_count: copy_outcome.tracked_files.len(),
             backup_root: installed_plugin
@@ -2552,20 +2620,14 @@ fn finalize_standalone_operations_install(
         "completed",
         100,
         format!("{} installed successfully", plugin.name),
-        Some(
-            "This resource was installed as a standalone desktop tool. Launch it from the installed folder and capture or link it in OBS as needed."
-                .to_string(),
-        ),
+        Some(success_message.clone()),
         true,
     );
 
     Ok(InstallResponse {
         success: true,
         code: None,
-        message: format!(
-            "{} was installed into the managed desktop tools library.",
-            plugin.name
-        ),
+        message: success_message,
         installed_plugin: Some(installed_plugin),
         manual_installer_path: None,
         download_path: Some(install_root.display().to_string()),
@@ -3034,6 +3096,9 @@ fn do_install_plugin(
     let github_requested =
         request.github_asset_name.is_some() || request.github_asset_url.is_some();
     let can_use_github_release = github_requested || request.package_id.is_none();
+    let can_use_resource_import = plugin.guide_only
+        || (plugin.packages.is_empty()
+            && (plugin.manual_install_url.is_some() || plugin.official_obs_url.is_some()));
 
     if can_use_github_release {
         match resolve_github_asset_for_install(plugin, &request) {
@@ -3088,7 +3153,7 @@ fn do_install_plugin(
         }
     }
 
-    if plugin.guide_only {
+    if can_use_resource_import {
         return install_resource_import(app, plugin, request.overwrite.unwrap_or(false), token);
     }
 

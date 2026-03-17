@@ -5,12 +5,15 @@ import { coerce, lt } from 'semver'
 import { Toaster } from 'sonner'
 
 import { AppUpdateDialog } from './components/AppUpdateDialog'
+import { EmptyState } from './components/EmptyState'
+import { ErrorState } from './components/ErrorState'
 import { RequiredUpdateScreen } from './components/RequiredUpdateScreen'
 import { SetupWizard } from './components/SetupWizard'
 import { AppShell } from './components/layout/AppShell'
-import { Button } from './components/ui/Button'
 import { getAnalyticsContext, trackAppOpenOnce } from './lib/analytics'
 import { desktopApi } from './lib/tauri'
+import { DashboardPage } from './pages/DashboardPage'
+import { DiagnosticsPage } from './pages/DiagnosticsPage'
 import { DiscoverPage } from './pages/DiscoverPage'
 import { InstalledPage } from './pages/InstalledPage'
 import { PluginDetailsPage } from './pages/PluginDetailsPage'
@@ -80,35 +83,44 @@ function StartupErrorScreen({
   isRetrying: boolean
   onRetry: () => void
 }) {
+  const lowerError = error.toLowerCase()
+  const isNetworkError =
+    lowerError.includes('network') ||
+    lowerError.includes('internet') ||
+    lowerError.includes('timed out') ||
+    lowerError.includes('connection') ||
+    lowerError.includes('dns')
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background-dark px-4">
-      <div className="w-full max-w-2xl rounded-xl border border-rose-400/20 bg-white/[0.03] p-6 shadow-panel">
-        <div className="flex items-start gap-4">
-          <div className="rounded-lg bg-rose-500/10 p-3 text-rose-300">
-            <AlertTriangle className="size-7" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h1 className="text-[18px] font-semibold tracking-tight text-white">
-              OBS Plugin Installer could not finish loading
-            </h1>
-            <p className="mt-2 text-sm leading-7 text-slate-300">
-              The backend returned this error during the initial bootstrap step.
-            </p>
-            <pre className="mt-4 overflow-x-auto rounded-lg border border-white/10 bg-white/[0.03] px-4 py-4 text-sm leading-6 text-rose-100">
-              {error}
-            </pre>
-            <div className="mt-4 flex flex-wrap gap-3">
-              <Button disabled={isRetrying} onClick={onRetry}>
-                {isRetrying ? (
-                  <LoaderCircle className="size-4 animate-spin" />
-                ) : (
-                  <RotateCcw className="size-4" />
-                )}
-                Retry startup
-              </Button>
-            </div>
-          </div>
-        </div>
+      <div className="w-full max-w-2xl">
+        {isNetworkError ? (
+          <EmptyState
+            description="We couldn’t reach the plugin catalog. Check your connection and try again."
+            icon={<AlertTriangle className="size-6" />}
+            primaryAction={{
+              label: isRetrying ? 'Retrying…' : 'Retry connection',
+              icon: isRetrying ? <LoaderCircle className="size-4 animate-spin" /> : <RotateCcw className="size-4" />,
+              onClick: onRetry,
+              variant: 'primary',
+              disabled: isRetrying,
+            }}
+            title="No internet connection"
+          />
+        ) : (
+          <ErrorState
+            description="The desktop backend returned this error during the initial bootstrap step."
+            details={error}
+            primaryAction={{
+              label: isRetrying ? 'Retrying…' : 'Retry startup',
+              icon: isRetrying ? <LoaderCircle className="size-4 animate-spin" /> : <RotateCcw className="size-4" />,
+              onClick: onRetry,
+              variant: 'primary',
+              disabled: isRetrying,
+            }}
+            title="OBS Plugin Installer could not finish loading"
+          />
+        )}
       </div>
     </div>
   )
@@ -366,7 +378,9 @@ function App() {
         <HashRouter>
           <Routes>
             <Route element={<AppShell />} path="/">
-              <Route element={<DiscoverPage />} index />
+              <Route element={<DashboardPage />} index />
+              <Route element={<DiagnosticsPage />} path="diagnostics" />
+              <Route element={<DiscoverPage />} path="plugins" />
               <Route element={<InstalledPage />} path="installed" />
               <Route element={<UpdatesPage />} path="updates" />
               <Route element={<SettingsPage />} path="settings" />
