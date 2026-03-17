@@ -190,6 +190,10 @@ export function PluginDetailsPage() {
     activePlugin.manualInstallUrl ??
     githubReleasesUrl ??
     activePlugin.homepageUrl
+  const githubAuthorProfile = activePlugin.githubRepo
+    ? `https://github.com/${activePlugin.githubRepo.split('/')[0]}`
+    : null
+  const authorProfileUrl = githubAuthorProfile ?? activePlugin.homepageUrl
 
   function handleInstall() {
     if (selectedGitHubAsset) {
@@ -594,6 +598,23 @@ export function PluginDetailsPage() {
                 Open repository
               </Button>
             ) : null}
+
+            <button
+              className="w-full rounded-lg border border-white/10 bg-white/[0.03] p-3 text-left transition-colors hover:bg-white/[0.06]"
+              onClick={() => void openExternal(authorProfileUrl)}
+              type="button"
+            >
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                Author profile
+              </p>
+              <div className="mt-2 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-white">{plugin.author}</p>
+                  <p className="mt-1 text-xs text-slate-400">View author page</p>
+                </div>
+                <ExternalLink className="size-4 text-slate-300" />
+              </div>
+            </button>
           </div>
 
           {recentHistory.length > 0 ? (
