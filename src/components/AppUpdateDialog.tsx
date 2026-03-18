@@ -12,6 +12,7 @@ interface AppUpdateDialogProps {
   status: AppUpdateStatus
   progress: AppUpdateProgressEvent | null
   isApplying: boolean
+  isRequired: boolean
   onDismiss: () => void
   onDownload: () => void
   onInstall: () => void
@@ -42,6 +43,7 @@ export function AppUpdateDialog({
   status,
   progress,
   isApplying,
+  isRequired,
   onDismiss,
   onDownload,
   onInstall,
@@ -61,10 +63,14 @@ export function AppUpdateDialog({
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-primary/80">
-              Update available
+              {isRequired ? 'Update required' : 'Update available'}
             </p>
             <h2 className="mt-2 text-xl font-semibold tracking-tight text-white">
-              {status === 'ready-to-restart' ? 'Restart to finish updating' : 'A newer app build is ready'}
+              {status === 'ready-to-restart'
+                ? 'Restart to finish updating'
+                : isRequired
+                  ? 'This app build needs an update'
+                  : 'A newer app build is ready'}
             </h2>
             <p className="mt-2 text-sm leading-7 text-slate-400">{snapshot.message}</p>
           </div>
@@ -115,14 +121,16 @@ export function AppUpdateDialog({
         </div>
 
         <div className="mt-5 flex flex-wrap justify-end gap-2">
-          {status === 'update-available' ? (
+          {status === 'update-available' || status === 'update-required' ? (
             <>
-              <Button variant="secondary" onClick={onDismiss}>
-                Remind me later
-              </Button>
+              {!isRequired ? (
+                <Button variant="secondary" onClick={onDismiss}>
+                  Remind me later
+                </Button>
+              ) : null}
               <Button onClick={onDownload}>
                 <Download className="size-4" />
-                Update now
+                Update
               </Button>
             </>
           ) : null}
