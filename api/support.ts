@@ -42,6 +42,13 @@ export default async function handler(request: VercelRequest, response: VercelRe
     return sendSupportSuccess(response)
   } catch (error) {
     console.error('[support-api] submission delivery failed', error)
-    return sendSupportError(response, 500, 'We could not submit your request right now. Please try again later.')
+
+    const detailedMessage = error instanceof Error ? error.message : null
+    const message =
+      process.env.NODE_ENV === 'production' || !detailedMessage
+        ? 'We could not submit your request right now. Please try again later.'
+        : `Support delivery failed: ${detailedMessage}`
+
+    return sendSupportError(response, 500, message)
   }
 }

@@ -112,8 +112,9 @@ Set these in the Vercel project used by the desktop app:
 - `SUPPORT_INBOX_EMAIL`
 - `SUPPORT_FROM_EMAIL`
 - `VITE_SUPPORT_API_BASE_URL` for the desktop build, for example `https://updates.example.com`
+- optional runtime override: `SUPPORT_API_BASE_URL`
 
-Set `VITE_SUPPORT_API_BASE_URL` in the GitHub Actions repository variables too, otherwise packaged desktop releases will not have the production support endpoint baked into the frontend bundle.
+Set `VITE_SUPPORT_API_BASE_URL` in the GitHub Actions repository variables too, otherwise packaged desktop releases will not have the production support endpoint baked into the frontend bundle. The Tauri app also now checks runtime `SUPPORT_API_BASE_URL` first and falls back to `TAURI_UPDATE_BASE_URL` when both APIs live on the same Vercel deployment.
 
 ### Production-safe MVP behavior
 
@@ -261,6 +262,7 @@ For every push and version-tag push, GitHub Actions:
 - verifies that the GitHub release tag matches the app version
 - builds Tauri release bundles
 - generates updater signatures because `bundle.createUpdaterArtifacts` is enabled
+- verifies each matrix build produced the expected installer/update artifact and signature pairs before upload
 - uploads installer artifacts and `.sig` files to the workflow run on normal branch pushes
 - creates a new release entry after successful `main` builds using the current app version and GitHub Actions run number
 - uploads both installer artifacts and `.sig` files to a GitHub Release automatically when the pushed ref is a version tag like `v0.2.0`
@@ -352,9 +354,8 @@ Optional GitHub Actions variable:
 The update server expects the GitHub Release to contain signed installer assets such as:
 
 - Windows:
-  - `*.exe`
-  - `*.msi`
-  - matching `*.sig`
+  - NSIS `*.exe` plus matching `*.exe.sig`
+  - MSI `*.msi` plus matching `*.msi.sig`
 - Linux:
   - `*.AppImage`
   - `*.deb`

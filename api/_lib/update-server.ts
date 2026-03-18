@@ -535,8 +535,17 @@ function resolveSelectionForTarget(release: GitHubRelease, target: SupportedTarg
 
   const nonSignatureAssets = release.assets.filter((asset) => !asset.name.toLowerCase().endsWith('.sig'))
   const installableAssets = nonSignatureAssets.filter((asset) => !isSourceOnlyAsset(asset.name))
+  const diagnostics = nonSignatureAssets.map((asset) => ({
+    asset: asset.name,
+    signature: Boolean(signatureAssets.get(asset.name.toLowerCase())),
+    sourceOnly: isSourceOnlyAsset(asset.name),
+  }))
 
   if (installableAssets.length === 0) {
+    console.warn('[update-api] no installable assets for target', {
+      target: target.key,
+      diagnostics,
+    })
     return {
       kind: nonSignatureAssets.length > 0 ? 'source-only' : 'missing',
       message: `The latest GitHub release only includes source or non-installable assets for ${target.label}.`,
@@ -567,6 +576,10 @@ function resolveSelectionForTarget(release: GitHubRelease, target: SupportedTarg
     .sort((left, right) => right.score - left.score || left.asset.name.localeCompare(right.asset.name))
 
   if (scored.length === 0) {
+    console.warn('[update-api] no scored assets for target', {
+      target: target.key,
+      diagnostics,
+    })
     return {
       kind: 'missing',
       message: `No ${target.reasonLabel} installable asset was found in the latest GitHub release.`,
@@ -671,6 +684,7 @@ export async function resolveUpdateCatalog(
   console.info('[update-api] assets found', {
     count: release.assets.length,
     tag: release.tag_name,
+    assets: release.assets.map((asset) => asset.name),
   })
 
   const selectionResults = new Map(
@@ -753,6 +767,12 @@ export async function resolveUpdateCatalog(
       payload.message =
         selection?.message ??
         `No ${options.target} ${options.arch} installable asset was found in the latest GitHub release.`
+      console.warn('[update-api] no platform selected for request', {
+        release: release.tag_name,
+        selectedKey,
+        fallbackStatus,
+        selection,
+      })
       return payload
     }
 
