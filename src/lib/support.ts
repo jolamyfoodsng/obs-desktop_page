@@ -1,6 +1,7 @@
 import packageJson from '../../package.json'
 
 import { getOrCreateInstallId } from './installId'
+import { desktopApi } from './tauri'
 
 export type SupportRequestKind = 'problem-report' | 'general-feedback' | 'plugin-request'
 
@@ -34,21 +35,24 @@ export class SupportSubmissionError extends Error {
 }
 
 const SUPPORT_API_BASE_URL = import.meta.env.VITE_SUPPORT_API_BASE_URL?.trim() ?? ''
+const DEFAULT_SUPPORT_API_BASE_URL = 'https://obs-desktop-page.vercel.app'
+
+function normalizeSupportApiBaseUrl(value: string) {
+  return value.trim().replace(/\/$/, '')
+}
 
 function resolveSupportApiUrl() {
-  const normalizedBaseUrl = SUPPORT_API_BASE_URL.replace(/\/$/, '')
+  const configuredBaseUrl = normalizeSupportApiBaseUrl(SUPPORT_API_BASE_URL)
 
-  if (normalizedBaseUrl) {
-    return `${normalizedBaseUrl}/api/support`
+  if (configuredBaseUrl) {
+    return `${configuredBaseUrl}/api/support`
   }
 
   if (typeof window !== 'undefined' && window.location.protocol.startsWith('http')) {
     return `${window.location.origin}/api/support`
   }
 
-  throw new Error(
-    'Support submissions are not configured for this desktop build. Please contact support or reinstall the latest app update.',
-  )
+  return `${DEFAULT_SUPPORT_API_BASE_URL}/api/support`
 }
 
 async function readSupportResponse(response: Response) {
@@ -77,7 +81,40 @@ function errorDetailsFromPayload(payload: SupportSubmissionResponse | string | n
   }
 }
 
-export async function submitSupportRequest(input: SupportSubmissionInput) {
+function supportRequestPayload(input: SupportSubmissionInput) {
+  return {
+    kind: input.kind,
+    email: input.email.trim(),
+    subject: input.subject?.trim() || null,
+    message: input.message.trim(),
+    pluginUrl: input.pluginUrl?.trim() || null,
+    obsVersion: input.obsVersion?.trim() || null,
+    appVersion: packageJson.version,
+    installId: getOrCreateInstallId(),
+    platform: input.platform ?? (typeof navigator !== 'undefined' ? navigator.platform : 'unknown'),
+  }
+}
+
+function parseDesktopSubmissionError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? 'Could not submit your request.')
+  const fieldMatch = /^FIELD:([^:]+):(.*)$/s.exec(message)
+
+  if (fieldMatch) {
+    return new SupportSubmissionError(fieldMatch[2].trim() || 'Could not submit your request.', fieldMatch[1].trim())
+  }
+
+  return new Error(message)
+}
+
+async function submitWithDesktopBridge(input: SupportSubmissionInput) {
+  try {
+    return await desktopApi.submitSupportRequest(supportRequestPayload(input))
+  } catch (error) {
+    throw parseDesktopSubmissionError(error)
+  }
+}
+
+async function submitWithFetch(input: SupportSubmissionInput) {
   const supportApiUrl = resolveSupportApiUrl()
 
   let response: Response
@@ -89,12 +126,7 @@ export async function submitSupportRequest(input: SupportSubmissionInput) {
         Accept: 'application/json',
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        ...input,
-        appVersion: packageJson.version,
-        installId: getOrCreateInstallId(),
-        platform: input.platform ?? (typeof navigator !== 'undefined' ? navigator.platform : 'unknown'),
-      }),
+      body: JSON.stringify(supportRequestPayload(input)),
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown network error'
@@ -121,4 +153,14 @@ export async function submitSupportRequest(input: SupportSubmissionInput) {
   }
 
   return payload
+}
+
+export async function submitSupportRequest(input: SupportSubmissionInput) {
+  const isDesktopRuntime = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+
+  if (isDesktopRuntime) {
+    return submitWithDesktopBridge(input)
+  }
+
+  return submitWithFetch(input)
 }
