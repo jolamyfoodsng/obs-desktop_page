@@ -310,13 +310,13 @@ export function DashboardPage() {
               Quick Actions
             </h2>
             <div className="mt-4 flex flex-col gap-3">
-              <Button onClick={() => void checkForAppUpdate({ forcePrompt: true })}>
-                <Download className="size-4" />
-                Check updates
-              </Button>
-              <Button variant="secondary" onClick={() => navigate('/plugins')}>
+              <Button onClick={() => navigate('/plugins')}>
                 <Boxes className="size-4" />
                 Browse plugins
+              </Button>
+              <Button variant="secondary"  onClick={() => void checkForAppUpdate({ forcePrompt: true })}>
+                <Download className="size-4" />
+                Check updates
               </Button>
               <Button variant="secondary" onClick={() => navigate('/diagnostics')}>
                 <Stethoscope className="size-4" />
@@ -375,43 +375,7 @@ export function DashboardPage() {
             </div>
           </section>
 
-          <section className="relative overflow-hidden rounded-[24px] border border-white/10 bg-white/[0.04] p-6">
-            <div className="absolute right-4 top-4 opacity-10">
-              <ShieldCheck className="size-16 text-primary" />
-            </div>
-            <h2 className="text-sm font-semibold uppercase tracking-[0.22em] text-slate-500">
-              Diagnostics
-            </h2>
-            <div className="mt-4 space-y-3">
-              <div className="flex items-center gap-2">
-                {diagnosticsHealthy ? (
-                  <>
-                    <ShieldCheck className="size-5 text-primary" />
-                    <span className="text-sm font-semibold text-primary">No issues found.</span>
-                  </>
-                ) : (
-                  <>
-                    <Activity className="size-5 text-amber-300" />
-                    <span className="text-sm font-semibold text-amber-200">
-                      Attention needed
-                    </span>
-                  </>
-                )}
-              </div>
-              <p className="text-sm leading-7 text-slate-400">
-                {diagnosticsHealthy
-                  ? 'Managed installs are verified and OBS is ready for plugin operations.'
-                  : `${verificationFailures} plugin installation${
-                      verificationFailures === 1 ? '' : 's'
-                    } need attention, or OBS validation needs review.`}
-              </p>
-              <Button size="sm" variant="ghost" onClick={() => navigate('/diagnostics')}>
-                <PackageCheck className="size-4" />
-                Open diagnostics
-                <ArrowRight className="size-4" />
-              </Button>
-            </div>
-          </section>
+
         </div>
       </section>
     </div>
