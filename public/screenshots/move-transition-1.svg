@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1600 900" fill="none">
+  <rect width="1600" height="900" fill="#13091B"/>
+  <rect x="56" y="56" width="1488" height="788" rx="38" fill="#1F122B" stroke="#5B2B7C"/>
+  <rect x="110" y="126" width="420" height="630" rx="28" fill="#120B19" stroke="#6A2EE6"/>
+  <rect x="580" y="126" width="864" height="132" rx="28" fill="#26163A"/>
+  <rect x="580" y="298" width="864" height="458" rx="28" fill="#120B19" stroke="#6A2EE6"/>
+  <rect x="652" y="384" width="214" height="214" rx="28" fill="url(#a)"/>
+  <rect x="934" y="344" width="364" height="34" rx="17" fill="#3A2554"/>
+  <rect x="934" y="404" width="248" height="24" rx="12" fill="#6A2EE6"/>
+  <rect x="934" y="456" width="292" height="24" rx="12" fill="#3A2554"/>
+  <rect x="934" y="508" width="332" height="24" rx="12" fill="#3A2554"/>
+  <rect x="934" y="560" width="200" height="24" rx="12" fill="#3A2554"/>
+  <text x="652" y="212" fill="#F8F7FB" font-family="Inter, Arial" font-size="44" font-weight="700">Move Transition</text>
+  <defs>
+    <linearGradient id="a" x1="652" y1="384" x2="866" y2="598" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#9D25F4"/>
+      <stop offset="1" stop-color="#4F46E5"/>
+    </linearGradient>
+  </defs>
+</svg>
