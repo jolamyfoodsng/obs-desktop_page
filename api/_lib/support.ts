@@ -31,7 +31,7 @@ export interface NormalizedSupportSubmission {
 }
 
 function json(response: VercelResponse, status: number, payload: Record<string, unknown>) {
-  response.status(status).json(payload)
+  return response.status(status).json(payload)
 }
 
 export function sendSupportError(response: VercelResponse, status: number, message: string, field?: string) {
@@ -159,8 +159,12 @@ export function validateSupportSubmission(payload: unknown) {
     return { error: { field: 'subject', message: 'Subject is too long.' } }
   }
 
+  if (!email) {
+    return { error: { field: 'email', message: 'Email is required.' } }
+  }
+
   if (!isValidEmail(email)) {
-    return { error: { field: 'email', message: 'Email address looks invalid.' } }
+    return { error: { field: 'email', message: 'Enter a valid email address.' } }
   }
 
   if (kind === 'plugin-request') {

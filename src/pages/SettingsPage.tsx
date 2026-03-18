@@ -18,7 +18,6 @@ import {
 } from 'lucide-react'
 
 import { Button } from '../components/ui/Button'
-import { useNavigate } from 'react-router-dom'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { CopyPathField } from '../components/ui/CopyPathField'
 import { ShortcutHint } from '../components/ui/ShortcutHint'
