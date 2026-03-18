@@ -9,7 +9,9 @@ import {
   RefreshCw,
   Search,
   Settings,
+  MessageSquareMore,
   Wrench,
+  MessageSquareMore,
 } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 
@@ -264,6 +266,13 @@ export function AppShell() {
         subtitle: 'Run a system health check for OBS and managed installs',
         icon: <Wrench className="size-4" />,
         onSelect: () => navigate('/diagnostics'),
+      },
+      {
+        id: 'command-open-support',
+        title: 'Open support center',
+        subtitle: 'Report issues, send feedback, or request a plugin',
+        icon: <MessageSquareMore className="size-4" />,
+        onSelect: () => navigate('/feedback'),
       },
       {
         id: 'command-open-installed',

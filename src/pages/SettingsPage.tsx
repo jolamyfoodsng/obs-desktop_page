@@ -14,9 +14,11 @@ import {
   TerminalSquare,
   Trash2,
   Video,
+  MessageSquareMore,
 } from 'lucide-react'
 
 import { Button } from '../components/ui/Button'
+import { useNavigate } from 'react-router-dom'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { CopyPathField } from '../components/ui/CopyPathField'
 import { ShortcutHint } from '../components/ui/ShortcutHint'
@@ -620,6 +622,24 @@ export function SettingsPage() {
                   </label>
                 ))}
               </div>
+            </div>
+          </div>
+        </SettingSection>
+
+
+        <SettingSection icon={<MessageSquareMore className="size-5" />} title="Support & Requests">
+          <div className="rounded-[24px] border border-white/10 bg-white/[0.04] p-6">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div className="max-w-2xl">
+                <p className="font-semibold text-white">Open the in-app support center</p>
+                <p className="mt-2 text-sm leading-6 text-slate-400">
+                  Report desktop issues, share UI feedback, or request a new plugin from a dedicated screen that matches the rest of the product experience.
+                </p>
+              </div>
+              <Button variant="secondary" onClick={() => navigate('/feedback')}>
+                <MessageSquareMore className="size-4" />
+                Open support center
+              </Button>
             </div>
           </div>
         </SettingSection>
