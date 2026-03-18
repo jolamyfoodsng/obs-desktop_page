@@ -3,10 +3,10 @@ import {
   ArrowRight,
   Boxes,
   Download,
-  FolderSearch2,
   PackageCheck,
   ShieldCheck,
   Stethoscope,
+  MessageSquareMore,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
@@ -42,7 +42,6 @@ export function DashboardPage() {
   const navigate = useNavigate()
   const bootstrap = useAppStore((state) => state.bootstrap)
   const checkForAppUpdate = useAppStore((state) => state.checkForAppUpdate)
-  const detectObs = useAppStore((state) => state.detectObs)
   const installPlugin = useAppStore((state) => state.installPlugin)
 
   if (!bootstrap) {
@@ -294,6 +293,10 @@ export function DashboardPage() {
               <Button variant="secondary" onClick={() => navigate('/diagnostics')}>
                 <Stethoscope className="size-4" />
                 Open diagnostics
+              </Button>
+              <Button variant="secondary" onClick={() => navigate('/feedback')}>
+                <MessageSquareMore className="size-4" />
+                Open support center
               </Button>
               {/* <Button variant="outline" onClick={() => void detectObs()}>
                 <FolderSearch2 className="size-4" />

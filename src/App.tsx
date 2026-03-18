@@ -15,6 +15,7 @@ import { desktopApi } from './lib/tauri'
 import { DashboardPage } from './pages/DashboardPage'
 import { DiagnosticsPage } from './pages/DiagnosticsPage'
 import { DiscoverPage } from './pages/DiscoverPage'
+import { FeedbackPage } from './pages/FeedbackPage'
 import { InstalledPage } from './pages/InstalledPage'
 import { PluginDetailsPage } from './pages/PluginDetailsPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -384,6 +385,7 @@ function App() {
               <Route element={<InstalledPage />} path="installed" />
               <Route element={<UpdatesPage />} path="updates" />
               <Route element={<SettingsPage />} path="settings" />
+              <Route element={<FeedbackPage />} path="feedback" />
               <Route element={<PluginDetailsPage />} path="plugin/:pluginId" />
             </Route>
           </Routes>
