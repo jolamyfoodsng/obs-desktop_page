@@ -1,12 +1,8 @@
 import {
-  Activity,
-  ArrowRight,
   Boxes,
   Download,
   LifeBuoy,
-  PackageCheck,
-  ShieldCheck,
-  Stethoscope,
+  Stethoscope
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
