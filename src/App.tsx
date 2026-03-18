@@ -121,7 +121,6 @@ function App() {
   const appUpdate = useAppStore((state) => state.appUpdate)
   const appUpdateStatus = useAppStore((state) => state.appUpdateStatus)
   const appUpdateProgress = useAppStore((state) => state.appUpdateProgress)
-  const dismissedAppUpdateVersion = useAppStore((state) => state.dismissedAppUpdateVersion)
   const isApplyingAppUpdate = useAppStore((state) => state.isApplyingAppUpdate)
   const { checkForAppUpdate, downloadAppUpdate, installAppUpdate } = useAppStore((state) => ({
     checkForAppUpdate: state.checkForAppUpdate,
@@ -350,9 +349,6 @@ function App() {
                 ? () => void openExternal(appUpdate.selectedAssetUrl ?? '')
                 : undefined
             }
-            onRetry={() => {
-              void checkForAppUpdate({ forcePrompt: true })
-            }}
             progress={appUpdateProgress}
             snapshot={appUpdate}
             status={appUpdateStatus}
