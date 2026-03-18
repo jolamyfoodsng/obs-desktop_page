@@ -111,15 +111,6 @@ export function DashboardPage() {
     )
   }).length
 
-  const verificationFailures = bootstrap.installedPlugins.filter(
-    (plugin) => plugin.verificationStatus === 'missing-files',
-  ).length
-
-  const diagnosticsHealthy =
-    verificationFailures === 0 &&
-    bootstrap.obsDetection.isValid &&
-    bootstrap.obsDetection.isSupported
-
   return (
     <div className="space-y-8">
       <section className="flex flex-col gap-3 border-b border-white/10 pb-5 lg:flex-row lg:items-center lg:justify-between">
