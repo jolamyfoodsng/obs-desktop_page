@@ -150,682 +150,692 @@ interface AppStoreState {
 
 let bootstrapRequest: Promise<void> | null = null
 
-export const useAppStore = create<AppStoreState>((set, get) => ({
-  bootstrap: null,
-  bootError: null,
-  isBootstrapping: true,
-  isSetupWorking: false,
-  isSettingsWorking: false,
-  uninstallingPluginId: null,
-  adoptingPluginId: null,
-  cancelingInstallPluginId: null,
-  searchQuery: '',
-  selectedCategory: 'Compatible',
-  catalogViewMode: readCatalogViewMode(),
-  appUpdate: null,
-  appUpdateStatus: 'idle',
-  appUpdateProgress: null,
-  isCheckingAppUpdate: false,
-  isApplyingAppUpdate: false,
-  dismissedAppUpdateVersion: readDismissedAppUpdateVersion(),
-  installProgress: null,
-  lastInstallResponse: null,
-  lastInstallRequest: null,
+export const useAppStore = create<AppStoreState>()((set, get) => {
+  return {
+    bootstrap: null,
+    bootError: null,
+    isBootstrapping: true,
+    isSetupWorking: false,
+    isSettingsWorking: false,
+    uninstallingPluginId: null,
+    adoptingPluginId: null,
+    cancelingInstallPluginId: null,
+    searchQuery: '',
+    selectedCategory: 'Compatible',
+    catalogViewMode: readCatalogViewMode(),
+    appUpdate: null,
+    appUpdateStatus: 'idle',
+    appUpdateProgress: null,
+    isCheckingAppUpdate: false,
+    isApplyingAppUpdate: false,
+    dismissedAppUpdateVersion: readDismissedAppUpdateVersion(),
+    installProgress: null,
+    lastInstallResponse: null,
+    lastInstallRequest: null,
 
-  async loadApp() {
-    if (bootstrapRequest) {
+    async loadApp() {
+      if (bootstrapRequest) {
+        return bootstrapRequest
+      }
+
+      set({ isBootstrapping: true, bootError: null })
+
+      bootstrapRequest = (async () => {
+        try {
+          const bootstrap = await desktopApi.bootstrap()
+          set({ bootstrap, bootError: null, isBootstrapping: false })
+        } catch (error) {
+          const message = getErrorMessage(error, 'Failed to load the desktop app state.')
+          set({ bootError: message, isBootstrapping: false })
+          toast.error(message)
+        } finally {
+          bootstrapRequest = null
+        }
+      })()
+
       return bootstrapRequest
-    }
+    },
 
-    set({ isBootstrapping: true, bootError: null })
+    async checkForAppUpdate(options?: { silent?: boolean; forcePrompt?: boolean }) {
+      set({
+        appUpdateStatus: 'checking',
+        appUpdateProgress: null,
+        isCheckingAppUpdate: true,
+      })
 
-    bootstrapRequest = (async () => {
       try {
-        const bootstrap = await desktopApi.bootstrap()
-        set({ bootstrap, bootError: null, isBootstrapping: false })
+        const snapshot = await desktopApi.checkAppUpdate()
+        const nextStatus = classifyAppUpdate(snapshot)
+
+        // Debug: log snapshot and classification to help diagnose UI visibility issues
+        // Remove or guard behind a dev flag if this is noisy in production.
+        // eslint-disable-next-line no-console
+        console.debug('checkForAppUpdate: snapshot=', snapshot, 'nextStatus=', nextStatus, 'dismissed=', get().dismissedAppUpdateVersion)
+
+        if (options?.forcePrompt && snapshot.latestVersion) {
+          writeDismissedAppUpdateVersion(null)
+        }
+
+        set((state) => ({
+          appUpdate: snapshot,
+          appUpdateStatus: nextStatus,
+          appUpdateProgress: null,
+          isCheckingAppUpdate: false,
+          dismissedAppUpdateVersion: options?.forcePrompt
+            ? null
+            : state.dismissedAppUpdateVersion,
+        }))
+        trackEvent('update_check', {
+          ...getAnalyticsContext(get().bootstrap),
+          status: nextStatus,
+          latestVersion: snapshot.latestVersion ?? null,
+          minimumSupportedVersion: snapshot.minimumSupportedVersion ?? null,
+          updateChannel: snapshot.updateChannel,
+        })
+
+        if (!options?.silent) {
+          if (nextStatus === 'no-update') {
+            toast.success('You are already on the latest desktop app build.')
+          } else if (nextStatus === 'disabled') {
+            toast(snapshot.message)
+          } else if (nextStatus === 'failed') {
+            toast.error(snapshot.message)
+          }
+        }
+
+        return snapshot
       } catch (error) {
-        const message = getErrorMessage(error, 'Failed to load the desktop app state.')
-        set({ bootError: message, isBootstrapping: false })
-        toast.error(message)
-      } finally {
-        bootstrapRequest = null
-      }
-    })()
-
-    return bootstrapRequest
-  },
-
-  async checkForAppUpdate(options) {
-    set({
-      appUpdateStatus: 'checking',
-      appUpdateProgress: null,
-      isCheckingAppUpdate: true,
-    })
-
-    try {
-      const snapshot = await desktopApi.checkAppUpdate()
-      const nextStatus = classifyAppUpdate(snapshot)
-
-      // Debug: log snapshot and classification to help diagnose UI visibility issues
-      // Remove or guard behind a dev flag if this is noisy in production.
-      // eslint-disable-next-line no-console
-      console.debug('checkForAppUpdate: snapshot=', snapshot, 'nextStatus=', nextStatus, 'dismissed=', get().dismissedAppUpdateVersion)
-
-      if (options?.forcePrompt && snapshot.latestVersion) {
-        writeDismissedAppUpdateVersion(null)
-      }
-
-      set((state) => ({
-        appUpdate: snapshot,
-        appUpdateStatus: nextStatus,
-        appUpdateProgress: null,
-        isCheckingAppUpdate: false,
-        dismissedAppUpdateVersion: options?.forcePrompt
-          ? null
-          : state.dismissedAppUpdateVersion,
-      }))
-      trackEvent('update_check', {
-        ...getAnalyticsContext(get().bootstrap),
-        status: nextStatus,
-        latestVersion: snapshot.latestVersion ?? null,
-        minimumSupportedVersion: snapshot.minimumSupportedVersion ?? null,
-        updateChannel: snapshot.updateChannel,
-      })
-
-      if (!options?.silent) {
-        if (nextStatus === 'no-update') {
-          toast.success('You are already on the latest desktop app build.')
-        } else if (nextStatus === 'disabled') {
-          toast(snapshot.message)
-        } else if (nextStatus === 'failed') {
-          toast.error(snapshot.message)
-        }
-      }
-
-      return snapshot
-    } catch (error) {
-      const message = getErrorMessage(error, 'Could not check for app updates.')
-      set((state) => ({
-        appUpdate: state.appUpdate
-          ? {
-            ...state.appUpdate,
-            status: 'failed',
-            message,
-          }
-          : {
-            status: 'failed',
-            message,
-            currentVersion: state.bootstrap?.currentVersion ?? '0.0.0',
-            latestVersion: null,
-            minimumSupportedVersion: null,
-            releaseNotes: null,
-            publishedAt: null,
-            updateChannel: state.bootstrap?.settings.betaUpdates ? 'beta' : 'stable',
-            releaseTag: null,
-            releaseUrl: null,
-            selectedAssetName: null,
-            selectedAssetReason: null,
-            selectedAssetUrl: null,
-            selectedAssetSize: null,
-          },
-        appUpdateStatus: 'failed',
-        appUpdateProgress: null,
-        isCheckingAppUpdate: false,
-      }))
-      trackEvent('update_check', {
-        ...getAnalyticsContext(get().bootstrap),
-        status: 'failed',
-        error: message,
-      })
-
-      if (!options?.silent) {
-        toast.error(message)
-      }
-
-      return undefined
-    }
-  },
-
-  async downloadAppUpdate() {
-    const currentUpdate = get().appUpdate
-    if (!currentUpdate) {
-      return undefined
-    }
-
-    set({
-      appUpdateStatus: 'downloading',
-      appUpdateProgress: null,
-    })
-
-    try {
-      const snapshot = await desktopApi.downloadAppUpdate()
-      const nextStatus = classifyAppUpdate(snapshot)
-
-      // Debug: log download result and classification
-      // eslint-disable-next-line no-console
-      console.debug('downloadAppUpdate: snapshot=', snapshot, 'nextStatus=', nextStatus)
-      set({
-        appUpdate: snapshot,
-        appUpdateStatus: nextStatus,
-        appUpdateProgress: null,
-      })
-      trackEvent('update_success', {
-        ...getAnalyticsContext(get().bootstrap),
-        phase: 'download',
-        status: nextStatus,
-        latestVersion: snapshot.latestVersion ?? null,
-        updateChannel: snapshot.updateChannel,
-      })
-      return snapshot
-    } catch (error) {
-      const message = getErrorMessage(error, 'Could not download the app update.')
-      set({
-        appUpdate: {
-          ...currentUpdate,
+        const message = getErrorMessage(error, 'Could not check for app updates.')
+        set((state) => ({
+          appUpdate: state.appUpdate
+            ? {
+              ...state.appUpdate,
+              status: 'failed',
+              message,
+            }
+            : {
+              status: 'failed',
+              message,
+              currentVersion: state.bootstrap?.currentVersion ?? '0.0.0',
+              latestVersion: null,
+              minimumSupportedVersion: null,
+              releaseNotes: null,
+              publishedAt: null,
+              updateChannel: state.bootstrap?.settings.betaUpdates ? 'beta' : 'stable',
+              releaseTag: null,
+              releaseUrl: null,
+              selectedAssetName: null,
+              selectedAssetReason: null,
+              selectedAssetUrl: null,
+              selectedAssetSize: null,
+            },
+          appUpdateStatus: 'failed',
+          appUpdateProgress: null,
+          isCheckingAppUpdate: false,
+        }))
+        trackEvent('update_check', {
+          ...getAnalyticsContext(get().bootstrap),
           status: 'failed',
-          message,
-        },
-        appUpdateStatus: 'failed',
-      })
-      toast.error(message)
-      return undefined
-    }
-  },
+          error: message,
+        })
 
-  async installAppUpdate() {
-    set({ isApplyingAppUpdate: true })
+        if (!options?.silent) {
+          toast.error(message)
+        }
 
-    try {
-      await desktopApi.installAppUpdate()
-      trackEvent('update_success', {
-        ...getAnalyticsContext(get().bootstrap),
-        phase: 'install',
-        latestVersion: get().appUpdate?.latestVersion ?? null,
+        return undefined
+      }
+    },
+
+    async downloadAppUpdate() {
+      const currentUpdate = get().appUpdate
+      if (!currentUpdate) {
+        return undefined
+      }
+
+      set({
+        appUpdateStatus: 'downloading',
+        appUpdateProgress: null,
       })
-    } catch (error) {
-      const message = getErrorMessage(error, 'Could not finish installing the app update.')
-      set((state) => ({
-        isApplyingAppUpdate: false,
-        appUpdate: state.appUpdate
-          ? {
-            ...state.appUpdate,
+
+      try {
+        const snapshot = await desktopApi.downloadAppUpdate()
+        const nextStatus = classifyAppUpdate(snapshot)
+
+        // Debug: log download result and classification
+        // eslint-disable-next-line no-console
+        console.debug('downloadAppUpdate: snapshot=', snapshot, 'nextStatus=', nextStatus)
+        set({
+          appUpdate: snapshot,
+          appUpdateStatus: nextStatus,
+          appUpdateProgress: null,
+        })
+        trackEvent('update_success', {
+          ...getAnalyticsContext(get().bootstrap),
+          phase: 'download',
+          status: nextStatus,
+          latestVersion: snapshot.latestVersion ?? null,
+          updateChannel: snapshot.updateChannel,
+        })
+        return snapshot
+      } catch (error) {
+        const message = getErrorMessage(error, 'Could not download the app update.')
+        set({
+          appUpdate: {
+            ...currentUpdate,
             status: 'failed',
             message,
-          }
-          : state.appUpdate,
-        appUpdateStatus: 'failed',
-      }))
-      toast.error(message)
-      return
-    }
-
-    set({ isApplyingAppUpdate: false })
-  },
-
-  dismissAppUpdate() {
-    const latestVersion = get().appUpdate?.latestVersion ?? null
-    writeDismissedAppUpdateVersion(latestVersion)
-    set({
-      dismissedAppUpdateVersion: latestVersion,
-    })
-  },
-
-  applyDetection(detection) {
-    set((state) => {
-      if (!state.bootstrap) {
-        return state
-      }
-
-      return {
-        bootstrap: {
-          ...state.bootstrap,
-          obsDetection: detection,
-          settings: {
-            ...state.bootstrap.settings,
-            obsPath: detection.storedPath,
-            setupCompleted: Boolean(detection.storedPath),
           },
-        },
+          appUpdateStatus: 'failed',
+        })
+        toast.error(message)
+        return undefined
       }
-    })
-  },
+    },
 
-  async detectObs() {
-    set({ isSetupWorking: true })
+    async installAppUpdate() {
+      set({ isApplyingAppUpdate: true })
 
-    try {
-      const detection = await desktopApi.detectObs()
-      get().applyDetection(detection)
-    } catch (error) {
-      toast.error(getErrorMessage(error, 'Automatic detection could not be completed.'))
-    } finally {
-      set({ isSetupWorking: false })
-    }
-  },
-
-  async chooseObsDirectory() {
-    set({ isSetupWorking: true })
-
-    try {
-      const detection = await desktopApi.chooseObsDirectory()
-      get().applyDetection(detection)
-
-      if (detection.storedPath) {
-        await get().loadApp()
+      try {
+        await desktopApi.installAppUpdate()
+        trackEvent('update_success', {
+          ...getAnalyticsContext(get().bootstrap),
+          phase: 'install',
+          latestVersion: get().appUpdate?.latestVersion ?? null,
+        })
+      } catch (error) {
+        const message = getErrorMessage(error, 'Could not finish installing the app update.')
+        set((state) => ({
+          isApplyingAppUpdate: false,
+          appUpdate: state.appUpdate
+            ? {
+              ...state.appUpdate,
+              status: 'failed',
+              message,
+            }
+            : state.appUpdate,
+          appUpdateStatus: 'failed',
+        }))
+        toast.error(message)
+        return
       }
-    } catch (error) {
-      toast.error(getErrorMessage(error, 'Could not open the folder chooser.'))
-    } finally {
-      set({ isSetupWorking: false })
-    }
-  },
 
-  async saveObsPath(path) {
-    set({ isSetupWorking: true })
+      set({ isApplyingAppUpdate: false })
+    },
 
-    try {
-      const detection = await desktopApi.saveObsPath(path)
-      get().applyDetection(detection)
+    dismissAppUpdate() {
+      const latestVersion = get().appUpdate?.latestVersion ?? null
+      writeDismissedAppUpdateVersion(latestVersion)
+      set({
+        dismissedAppUpdateVersion: latestVersion,
+      })
+    },
 
-      if (detection.storedPath) {
-        await get().loadApp()
-      } else {
-        toast.error(detection.message)
-      }
-    } catch (error) {
-      toast.error(getErrorMessage(error, 'Could not save the OBS folder.'))
-    } finally {
-      set({ isSetupWorking: false })
-    }
-  },
-
-  async updateSettings(patch) {
-    const currentSettings = get().bootstrap?.settings
-    if (!currentSettings) {
-      return
-    }
-
-    const nextSettings: AppSettings = {
-      ...currentSettings,
-      ...patch,
-    }
-
-    set((state) => ({
-      isSettingsWorking: true,
-      bootstrap: state.bootstrap
-        ? {
-          ...state.bootstrap,
-          settings: nextSettings,
+    applyDetection(detection: ObsDetectionState) {
+      set((state) => {
+        if (!state.bootstrap) {
+          return state
         }
-        : state.bootstrap,
-    }))
 
-    try {
-      const savedSettings = await desktopApi.saveAppSettings(nextSettings)
-      set((state) => ({
-        isSettingsWorking: false,
-        bootstrap: state.bootstrap
-          ? {
+        return {
+          bootstrap: {
             ...state.bootstrap,
-            settings: savedSettings,
-          }
-          : state.bootstrap,
-      }))
+            obsDetection: detection,
+            settings: {
+              ...state.bootstrap.settings,
+              obsPath: detection.storedPath,
+              setupCompleted: Boolean(detection.storedPath),
+            },
+          },
+        }
+      })
+    },
 
-      if (Object.prototype.hasOwnProperty.call(patch, 'installScope')) {
+    async detectObs() {
+      set({ isSetupWorking: true })
+
+      try {
         const detection = await desktopApi.detectObs()
         get().applyDetection(detection)
+      } catch (error) {
+        toast.error(getErrorMessage(error, 'Automatic detection could not be completed.'))
+      } finally {
+        set({ isSetupWorking: false })
       }
-    } catch (error) {
+    },
+
+    async chooseObsDirectory() {
+      set({ isSetupWorking: true })
+
+      try {
+        const detection = await desktopApi.chooseObsDirectory()
+        get().applyDetection(detection)
+
+        if (detection.storedPath) {
+          await get().loadApp()
+        }
+      } catch (error) {
+        toast.error(getErrorMessage(error, 'Could not open the folder chooser.'))
+      } finally {
+        set({ isSetupWorking: false })
+      }
+    },
+
+    async saveObsPath(path: string) {
+      set({ isSetupWorking: true })
+
+      try {
+        const detection = await desktopApi.saveObsPath(path)
+        get().applyDetection(detection)
+
+        if (detection.storedPath) {
+          await get().loadApp()
+        } else {
+          toast.error(detection.message)
+        }
+      } catch (error) {
+        toast.error(getErrorMessage(error, 'Could not save the OBS folder.'))
+      } finally {
+        set({ isSetupWorking: false })
+      }
+    },
+
+    async updateSettings(patch: Partial<AppSettings>) {
+      const currentSettings = get().bootstrap?.settings
+      if (!currentSettings) {
+        return
+      }
+
+      const nextSettings: AppSettings = {
+        ...currentSettings,
+        ...patch,
+      }
+
       set((state) => ({
-        isSettingsWorking: false,
+        isSettingsWorking: true,
         bootstrap: state.bootstrap
           ? {
             ...state.bootstrap,
-            settings: currentSettings,
+            settings: nextSettings,
           }
           : state.bootstrap,
       }))
-      toast.error(getErrorMessage(error, 'Could not save these app settings.'))
-    }
-  },
 
-  async clearCache() {
-    set({ isSettingsWorking: true })
+      try {
+        const savedSettings = await desktopApi.saveAppSettings(nextSettings)
+        set((state) => ({
+          isSettingsWorking: false,
+          bootstrap: state.bootstrap
+            ? {
+              ...state.bootstrap,
+              settings: savedSettings,
+            }
+            : state.bootstrap,
+        }))
 
-    try {
-      const response = await desktopApi.clearAppCache()
-      set({ isSettingsWorking: false })
-      toast.success(response.message)
-    } catch (error) {
-      set({ isSettingsWorking: false })
-      toast.error(getErrorMessage(error, 'Could not clear the app cache.'))
-    }
-  },
-
-  async exportLogs() {
-    set({ isSettingsWorking: true })
-
-    try {
-      const response = await desktopApi.exportLogs()
-      set({ isSettingsWorking: false })
-      toast.success(response.message)
-
-      if (response.path) {
-        await desktopApi.revealPath(response.path)
+        if (Object.prototype.hasOwnProperty.call(patch, 'installScope')) {
+          const detection = await desktopApi.detectObs()
+          get().applyDetection(detection)
+        }
+      } catch (error) {
+        set((state) => ({
+          isSettingsWorking: false,
+          bootstrap: state.bootstrap
+            ? {
+              ...state.bootstrap,
+              settings: currentSettings,
+            }
+            : state.bootstrap,
+        }))
+        toast.error(getErrorMessage(error, 'Could not save these app settings.'))
       }
-    } catch (error) {
-      set({ isSettingsWorking: false })
-      toast.error(getErrorMessage(error, 'Could not export diagnostics.'))
-    }
-  },
+    },
 
-  async resetAppData() {
-    set({ isSettingsWorking: true })
+    async clearCache() {
+      set({ isSettingsWorking: true })
 
-    try {
-      const response = await desktopApi.resetAppState()
+      try {
+        const response = await desktopApi.clearAppCache()
+        set({ isSettingsWorking: false })
+        toast.success(response.message)
+      } catch (error) {
+        set({ isSettingsWorking: false })
+        toast.error(getErrorMessage(error, 'Could not clear the app cache.'))
+      }
+    },
+
+    async exportLogs() {
+      set({ isSettingsWorking: true })
+
+      try {
+        const response = await desktopApi.exportLogs()
+        set({ isSettingsWorking: false })
+        toast.success(response.message)
+
+        if (response.path) {
+          await desktopApi.revealPath(response.path)
+        }
+      } catch (error) {
+        set({ isSettingsWorking: false })
+        toast.error(getErrorMessage(error, 'Could not export diagnostics.'))
+      }
+    },
+
+    async resetAppData() {
+      set({ isSettingsWorking: true })
+
+      try {
+        const response = await desktopApi.resetAppState()
+        set({
+          isSettingsWorking: false,
+          searchQuery: '',
+          selectedCategory: 'Compatible',
+          catalogViewMode: 'list',
+          appUpdate: null,
+          appUpdateStatus: 'idle',
+          appUpdateProgress: null,
+          dismissedAppUpdateVersion: null,
+          installProgress: null,
+          lastInstallResponse: null,
+          lastInstallRequest: null,
+          cancelingInstallPluginId: null,
+        })
+        window.localStorage.setItem(CATALOG_VIEW_MODE_STORAGE_KEY, 'list')
+        writeDismissedAppUpdateVersion(null)
+        toast.success(response.message)
+        await get().loadApp()
+      } catch (error) {
+        set({ isSettingsWorking: false })
+        toast.error(getErrorMessage(error, 'Could not reset the local app data.'))
+      }
+    },
+
+    async installPlugin(
+      pluginId: string,
+      options?: {
+        packageId?: string | null
+        overwrite?: boolean
+        githubAssetName?: string | null
+        githubAssetUrl?: string | null
+      },
+    ) {
+      const bootstrap = get().bootstrap
+      const plugin = bootstrap?.plugins.find((entry) => entry.id === pluginId)
+      const existingInstall = bootstrap?.installedPlugins.find((entry) => entry.pluginId === pluginId)
+
       set({
-        isSettingsWorking: false,
-        searchQuery: '',
-        selectedCategory: 'Compatible',
-        catalogViewMode: 'list',
-        appUpdate: null,
-        appUpdateStatus: 'idle',
-        appUpdateProgress: null,
-        dismissedAppUpdateVersion: null,
-        installProgress: null,
+        installProgress: {
+          pluginId,
+          stage: 'preparing',
+          progress: 4,
+          message: 'Preparing installation',
+          detail: 'Starting plugin install workflow.',
+        },
         lastInstallResponse: null,
-        lastInstallRequest: null,
+        lastInstallRequest: { pluginId, options },
         cancelingInstallPluginId: null,
       })
-      window.localStorage.setItem(CATALOG_VIEW_MODE_STORAGE_KEY, 'list')
-      writeDismissedAppUpdateVersion(null)
-      toast.success(response.message)
-      await get().loadApp()
-    } catch (error) {
-      set({ isSettingsWorking: false })
-      toast.error(getErrorMessage(error, 'Could not reset the local app data.'))
-    }
-  },
+      trackEvent(
+        'plugin_install_start',
+        getPluginAnalyticsProperties(plugin, bootstrap, existingInstall, {
+          overwrite: Boolean(options?.overwrite),
+          packageId: options?.packageId ?? null,
+          githubAssetName: options?.githubAssetName ?? null,
+          installSource: options?.githubAssetName
+            ? 'github-release'
+            : options?.packageId
+              ? 'catalog-package'
+              : 'auto',
+        }),
+      )
 
-  async installPlugin(pluginId, options) {
-    const bootstrap = get().bootstrap
-    const plugin = bootstrap?.plugins.find((entry) => entry.id === pluginId)
-    const existingInstall = bootstrap?.installedPlugins.find((entry) => entry.pluginId === pluginId)
+      try {
+        const response = await desktopApi.installPlugin({
+          pluginId,
+          packageId: options?.packageId,
+          overwrite: options?.overwrite,
+          githubAssetName: options?.githubAssetName,
+          githubAssetUrl: options?.githubAssetUrl,
+        })
 
-    set({
-      installProgress: {
-        pluginId,
-        stage: 'preparing',
-        progress: 4,
-        message: 'Preparing installation',
-        detail: 'Starting plugin install workflow.',
-      },
-      lastInstallResponse: null,
-      lastInstallRequest: { pluginId, options },
-      cancelingInstallPluginId: null,
-    })
-    trackEvent(
-      'plugin_install_start',
-      getPluginAnalyticsProperties(plugin, bootstrap, existingInstall, {
-        overwrite: Boolean(options?.overwrite),
-        packageId: options?.packageId ?? null,
-        githubAssetName: options?.githubAssetName ?? null,
-        installSource: options?.githubAssetName
-          ? 'github-release'
-          : options?.packageId
-            ? 'catalog-package'
-            : 'auto',
-      }),
-    )
+        if (!response.success) {
+          if (response.code === 'CANCELED') {
+            set((state) => ({
+              lastInstallResponse: response,
+              cancelingInstallPluginId: null,
+              installProgress:
+                state.installProgress?.pluginId === pluginId &&
+                  state.installProgress?.stage === 'canceled'
+                  ? state.installProgress
+                  : {
+                    pluginId,
+                    stage: 'canceled',
+                    progress: 100,
+                    message: 'Download canceled',
+                    detail: response.message,
+                    terminal: true,
+                  },
+            }))
+            await get().loadApp()
+            return response
+          }
 
-    try {
-      const response = await desktopApi.installPlugin({
-        pluginId,
-        packageId: options?.packageId,
-        overwrite: options?.overwrite,
-        githubAssetName: options?.githubAssetName,
-        githubAssetUrl: options?.githubAssetUrl,
-      })
+          set({ lastInstallResponse: response })
 
-      if (!response.success) {
-        if (response.code === 'CANCELED') {
-          set((state) => ({
-            lastInstallResponse: response,
-            cancelingInstallPluginId: null,
-            installProgress:
-              state.installProgress?.pluginId === pluginId &&
-                state.installProgress.stage === 'canceled'
-                ? state.installProgress
-                : {
-                  pluginId,
-                  stage: 'canceled',
-                  progress: 100,
-                  message: 'Download canceled',
-                  detail: response.message,
-                  terminal: true,
-                },
-          }))
-          await get().loadApp()
+          trackEvent(
+            'plugin_install_fail',
+            getPluginAnalyticsProperties(plugin, bootstrap, existingInstall, {
+              code: response.code ?? 'unknown',
+              message: response.message,
+            }),
+          )
+
+          if (response.code === 'MANUAL_ONLY') {
+            const plugin = get().bootstrap?.plugins.find((entry) => entry.id === pluginId)
+            if (plugin) {
+              await get().openExternal(plugin.manualInstallUrl ?? plugin.homepageUrl)
+            }
+            return response
+          }
+
+          if (response.code === 'FILE_CONFLICT' && !options?.overwrite) {
+            const preview = response.conflicts?.slice(0, 6).join('\n') ?? ''
+            const accepted = window.confirm(
+              `${response.message}\n\n${preview}\n\nContinue and overwrite these files?`,
+            )
+
+            if (accepted) {
+              return get().installPlugin(pluginId, {
+                ...options,
+                overwrite: true,
+              })
+            }
+          }
+
+          if (response.code === 'REVIEW_REQUIRED') {
+            return response
+          }
+
+          toast.error(response.message)
           return response
         }
 
         set({ lastInstallResponse: response })
 
+        if (response.installerStarted) {
+          toast.success(response.message)
+        } else if (response.manualInstallerPath) {
+          toast(response.message)
+        } else if (response.installedPlugin) {
+          toast.success(response.message)
+        }
         trackEvent(
-          'plugin_install_fail',
-          getPluginAnalyticsProperties(plugin, bootstrap, existingInstall, {
-            code: response.code ?? 'unknown',
-            message: response.message,
+          'plugin_install_success',
+          getPluginAnalyticsProperties(plugin, bootstrap, response.installedPlugin ?? existingInstall, {
+            installerStarted: Boolean(response.installerStarted),
+            requiresRestart: response.requiresRestart,
+            installKind: response.installedPlugin?.installKind ?? null,
+            sourceType: response.installedPlugin?.sourceType ?? null,
           }),
         )
 
-        if (response.code === 'MANUAL_ONLY') {
-          const plugin = get().bootstrap?.plugins.find((entry) => entry.id === pluginId)
-          if (plugin) {
-            await get().openExternal(plugin.manualInstallUrl ?? plugin.homepageUrl)
-          }
-          return response
-        }
-
-        if (response.code === 'FILE_CONFLICT' && !options?.overwrite) {
-          const preview = response.conflicts?.slice(0, 6).join('\n') ?? ''
-          const accepted = window.confirm(
-            `${response.message}\n\n${preview}\n\nContinue and overwrite these files?`,
-          )
-
-          if (accepted) {
-            return get().installPlugin(pluginId, {
-              ...options,
-              overwrite: true,
-            })
-          }
-        }
-
-        if (response.code === 'REVIEW_REQUIRED') {
-          return response
-        }
-
-        toast.error(response.message)
+        await get().loadApp()
+        set({ cancelingInstallPluginId: null })
         return response
+      } catch (error) {
+        const message = getErrorMessage(error, 'Unexpected plugin install failure.')
+
+        set({
+          cancelingInstallPluginId: null,
+          installProgress: {
+            pluginId,
+            stage: 'error',
+            progress: 100,
+            message: 'Installation failed',
+            detail: message,
+            terminal: true,
+          },
+        })
+        trackEvent(
+          'plugin_install_fail',
+          getPluginAnalyticsProperties(plugin, bootstrap, existingInstall, {
+            code: 'unexpected-error',
+            message,
+          }),
+        )
+        toast.error(message)
+        return undefined
+      }
+    },
+
+    async retryLastInstall() {
+      const request = get().lastInstallRequest
+      if (!request) {
+        return undefined
       }
 
-      set({ lastInstallResponse: response })
+      return get().installPlugin(request.pluginId, request.options)
+    },
 
-      if (response.installerStarted) {
-        toast.success(response.message)
-      } else if (response.manualInstallerPath) {
-        toast(response.message)
-      } else if (response.installedPlugin) {
-        toast.success(response.message)
+    async cancelInstall(pluginId: string) {
+      set({ cancelingInstallPluginId: pluginId })
+
+      try {
+        const response = await desktopApi.cancelPluginInstall(pluginId)
+        if (!response.canceled) {
+          set({ cancelingInstallPluginId: null })
+          toast.error(response.message)
+        }
+      } catch (error) {
+        set({ cancelingInstallPluginId: null })
+        toast.error(getErrorMessage(error, 'Could not stop the install safely.'))
       }
-      trackEvent(
-        'plugin_install_success',
-        getPluginAnalyticsProperties(plugin, bootstrap, response.installedPlugin ?? existingInstall, {
-          installerStarted: Boolean(response.installerStarted),
-          requiresRestart: response.requiresRestart,
-          installKind: response.installedPlugin?.installKind ?? null,
-          sourceType: response.installedPlugin?.sourceType ?? null,
-        }),
-      )
+    },
 
-      await get().loadApp()
-      set({ cancelingInstallPluginId: null })
-      return response
-    } catch (error) {
-      const message = getErrorMessage(error, 'Unexpected plugin install failure.')
+    async uninstallPlugin(pluginId: string) {
+      set({ uninstallingPluginId: pluginId })
+
+      try {
+        const response = await desktopApi.uninstallPlugin(pluginId)
+        set({ uninstallingPluginId: null })
+        toast.success(response.message)
+        await get().loadApp()
+        return response
+      } catch (error) {
+        set({ uninstallingPluginId: null })
+        toast.error(getErrorMessage(error, 'Could not remove the installed plugin.'))
+        return undefined
+      }
+    },
+
+    async adoptInstallation(pluginId: string) {
+      set({ adoptingPluginId: pluginId })
+
+      try {
+        await desktopApi.adoptInstallation(pluginId)
+        set({ adoptingPluginId: null })
+        toast.success('This installation is now managed by OBS Plugin Installer.')
+        await get().loadApp()
+      } catch (error) {
+        set({ adoptingPluginId: null })
+        toast.error(getErrorMessage(error, 'Could not adopt that installation.'))
+      }
+    },
+
+    async openExternal(url: string) {
+      try {
+        await desktopApi.openExternal(url)
+      } catch (error) {
+        toast.error(getErrorMessage(error, 'Could not open the external link.'))
+      }
+    },
+
+    async openLocalPath(path: string) {
+      try {
+        await desktopApi.openLocalPath(path)
+      } catch (error) {
+        toast.error(getErrorMessage(error, 'Could not open the downloaded installer file.'))
+      }
+    },
+
+    async revealPath(path: string) {
+      try {
+        await desktopApi.revealPath(path)
+      } catch (error) {
+        toast.error(getErrorMessage(error, 'Could not open that folder in your file manager.'))
+      }
+    },
+
+    setSearchQuery(query: string) {
+      set({ searchQuery: query })
+    },
+
+    setSelectedCategory(category: string) {
+      set({ selectedCategory: category })
+    },
+
+    setCatalogViewMode(mode: CatalogViewMode) {
+      window.localStorage.setItem(CATALOG_VIEW_MODE_STORAGE_KEY, mode)
+      set({ catalogViewMode: mode })
+    },
+
+    clearInstallProgress() {
+      set({
+        installProgress: null,
+        lastInstallResponse: null,
+        lastInstallRequest: null,
+        cancelingInstallPluginId: null,
+      })
+    },
+
+    handleInstallProgress(progress: InstallProgressEvent) {
+      set((state) => {
+        if (
+          state.installProgress?.pluginId === progress.pluginId &&
+          state.installProgress.stage === 'canceled' &&
+          state.installProgress.terminal
+        ) {
+          return {
+            installProgress: state.installProgress,
+            cancelingInstallPluginId: null,
+          }
+        }
+
+        return {
+          installProgress: progress,
+          cancelingInstallPluginId: progress.terminal ? null : state.cancelingInstallPluginId,
+        }
+      })
+    },
+
+    handleAppUpdateProgress(progress: AppUpdateProgressEvent) {
+      // eslint-disable-next-line no-console
+      console.debug('handleAppUpdateProgress:', progress)
 
       set({
-        cancelingInstallPluginId: null,
-        installProgress: {
-          pluginId,
-          stage: 'error',
-          progress: 100,
-          message: 'Installation failed',
-          detail: message,
-          terminal: true,
-        },
+        appUpdateProgress: progress,
+        appUpdateStatus: progress.stage === 'finished' ? 'ready-to-restart' : 'downloading',
       })
-      trackEvent(
-        'plugin_install_fail',
-        getPluginAnalyticsProperties(plugin, bootstrap, existingInstall, {
-          code: 'unexpected-error',
-          message,
-        }),
-      )
-      toast.error(message)
-      return undefined
-    }
-  },
-
-  async retryLastInstall() {
-    const request = get().lastInstallRequest
-    if (!request) {
-      return undefined
-    }
-
-    return get().installPlugin(request.pluginId, request.options)
-  },
-
-  async cancelInstall(pluginId) {
-    set({ cancelingInstallPluginId: pluginId })
-
-    try {
-      const response = await desktopApi.cancelPluginInstall(pluginId)
-      if (!response.canceled) {
-        set({ cancelingInstallPluginId: null })
-        toast.error(response.message)
-      }
-    } catch (error) {
-      set({ cancelingInstallPluginId: null })
-      toast.error(getErrorMessage(error, 'Could not stop the install safely.'))
-    }
-  },
-
-  async uninstallPlugin(pluginId) {
-    set({ uninstallingPluginId: pluginId })
-
-    try {
-      const response = await desktopApi.uninstallPlugin(pluginId)
-      set({ uninstallingPluginId: null })
-      toast.success(response.message)
-      await get().loadApp()
-      return response
-    } catch (error) {
-      set({ uninstallingPluginId: null })
-      toast.error(getErrorMessage(error, 'Could not remove the installed plugin.'))
-      return undefined
-    }
-  },
-
-  async adoptInstallation(pluginId) {
-    set({ adoptingPluginId: pluginId })
-
-    try {
-      await desktopApi.adoptInstallation(pluginId)
-      set({ adoptingPluginId: null })
-      toast.success('This installation is now managed by OBS Plugin Installer.')
-      await get().loadApp()
-    } catch (error) {
-      set({ adoptingPluginId: null })
-      toast.error(getErrorMessage(error, 'Could not adopt that installation.'))
-    }
-  },
-
-  async openExternal(url) {
-    try {
-      await desktopApi.openExternal(url)
-    } catch (error) {
-      toast.error(getErrorMessage(error, 'Could not open the external link.'))
-    }
-  },
-
-  async openLocalPath(path) {
-    try {
-      await desktopApi.openLocalPath(path)
-    } catch (error) {
-      toast.error(getErrorMessage(error, 'Could not open the downloaded installer file.'))
-    }
-  },
-
-  async revealPath(path) {
-    try {
-      await desktopApi.revealPath(path)
-    } catch (error) {
-      toast.error(getErrorMessage(error, 'Could not open that folder in your file manager.'))
-    }
-  },
-
-  setSearchQuery(query) {
-    set({ searchQuery: query })
-  },
-
-  setSelectedCategory(category) {
-    set({ selectedCategory: category })
-  },
-
-  setCatalogViewMode(mode) {
-    window.localStorage.setItem(CATALOG_VIEW_MODE_STORAGE_KEY, mode)
-    set({ catalogViewMode: mode })
-  },
-
-  clearInstallProgress() {
-    set({
-      installProgress: null,
-      lastInstallResponse: null,
-      lastInstallRequest: null,
-      cancelingInstallPluginId: null,
-    })
-  },
-
-  handleInstallProgress(progress) {
-    set((state) => {
-      if (
-        state.installProgress?.pluginId === progress.pluginId &&
-        state.installProgress.stage === 'canceled' &&
-        state.installProgress.terminal
-      ) {
-        return {
-          installProgress: state.installProgress,
-          cancelingInstallPluginId: null,
-        }
-      }
-
-      return {
-        installProgress: progress,
-        cancelingInstallPluginId: progress.terminal ? null : state.cancelingInstallPluginId,
-      }
-    })
-  },
-
-  handleAppUpdateProgress(progress) {
-    // eslint-disable-next-line no-console
-    console.debug('handleAppUpdateProgress:', progress)
-
-    set({
-      appUpdateProgress: progress,
-      appUpdateStatus: progress.stage === 'finished' ? 'ready-to-restart' : 'downloading',
-    })
-  },
-}))
+    },
+  }
+})

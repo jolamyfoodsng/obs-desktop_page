@@ -257,14 +257,18 @@ interface ResolveCatalogOptions {
   channel?: string
   releaseVersion?: string
 }
-function getEnv(name: string) {
+function getEnv(name: string, required = true) {
   const value = process.env[name]?.trim()
-  if (!value) {
+  if (!value && required) {
     throw new Error(
       `Missing required environment variable: ${name}. Please set this in your .env.local (dev) or Vercel Environment Variables (prod).`,
     )
   }
-  return value
+  return value || null
+}
+
+function getAuthHeaders(token: string | null) {
+  return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
 function normalizeVersion(value: string | undefined | null) {
@@ -374,14 +378,14 @@ function inferBaseUrl(request: VercelRequest) {
 }
 
 async function githubJson<T>(path: string) {
-  const token = getEnv('GITHUB_TOKEN')
+  const token = getEnv('GITHUB_TOKEN', false)
   const owner = getEnv('GITHUB_OWNER')
   const repo = getEnv('GITHUB_REPO')
 
   const response = await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}${path}`, {
     headers: {
       Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${token}`,
+      ...getAuthHeaders(token),
       'User-Agent': 'obs-plugin-installer-update-server',
       'X-GitHub-Api-Version': '2022-11-28',
     },
@@ -617,12 +621,12 @@ function resolveSelectionForTarget(release: GitHubRelease, target: SupportedTarg
 }
 
 async function fetchSignature(asset: GitHubReleaseAsset) {
-  const token = getEnv('GITHUB_TOKEN')
+  const token = getEnv('GITHUB_TOKEN', false)
 
   const response = await fetch(asset.url, {
     headers: {
       Accept: 'application/octet-stream',
-      Authorization: `Bearer ${token}`,
+      ...getAuthHeaders(token),
       'User-Agent': 'obs-plugin-installer-update-server',
       'X-GitHub-Api-Version': '2022-11-28',
     },

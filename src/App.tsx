@@ -4,7 +4,6 @@ import { AlertTriangle, LoaderCircle, RotateCcw } from 'lucide-react'
 
 import { Toaster } from 'sonner'
 
-import { AppUpdateDialog } from './components/AppUpdateDialog'
 import { EmptyState } from './components/EmptyState'
 import { ErrorState } from './components/ErrorState'
 import { RequiredUpdateScreen } from './components/RequiredUpdateScreen'
@@ -124,19 +123,24 @@ function App() {
   const appUpdateProgress = useAppStore((state) => state.appUpdateProgress)
   const dismissedAppUpdateVersion = useAppStore((state) => state.dismissedAppUpdateVersion)
   const isApplyingAppUpdate = useAppStore((state) => state.isApplyingAppUpdate)
-  const checkForAppUpdate = useAppStore((state) => state.checkForAppUpdate)
-  const downloadAppUpdate = useAppStore((state) => state.downloadAppUpdate)
-  const installAppUpdate = useAppStore((state) => state.installAppUpdate)
-  const dismissAppUpdate = useAppStore((state) => state.dismissAppUpdate)
+  const { checkForAppUpdate, downloadAppUpdate, installAppUpdate } = useAppStore((state) => ({
+    checkForAppUpdate: state.checkForAppUpdate,
+    downloadAppUpdate: state.downloadAppUpdate,
+    installAppUpdate: state.installAppUpdate,
+  }))
   const detectObs = useAppStore((state) => state.detectObs)
   const chooseObsDirectory = useAppStore((state) => state.chooseObsDirectory)
   const saveObsPath = useAppStore((state) => state.saveObsPath)
   const handleInstallProgress = useAppStore((state) => state.handleInstallProgress)
   const handleAppUpdateProgress = useAppStore((state) => state.handleAppUpdateProgress)
   const openExternal = useAppStore((state) => state.openExternal)
-  const [systemPrefersLight, setSystemPrefersLight] = useState(() =>
-    window.matchMedia('(prefers-color-scheme: light)').matches,
-  )
+  const [systemPrefersLight, setSystemPrefersLight] = useState(() => {
+    try {
+      return window.matchMedia('(prefers-color-scheme: light)').matches
+    } catch {
+      return false
+    }
+  })
   const [isStartupUpdateCheckComplete, setIsStartupUpdateCheckComplete] = useState(false)
   const [bypassedRequiredUpdateVersion, setBypassedRequiredUpdateVersion] = useState<string | null>(null)
   const startupUpdateCheckStartedRef = useRef(false)
@@ -205,7 +209,7 @@ function App() {
     document.documentElement.classList.toggle('dark', effectiveTheme !== 'light')
     document.documentElement.style.setProperty(
       '--accent-rgb',
-      accentColorMap[accentColor],
+      accentColorMap[accentColor as AccentColor],
     )
   }, [bootstrap?.settings.accentColor, bootstrap?.settings.language, effectiveTheme])
 
@@ -315,113 +319,81 @@ function App() {
     canBypassRequiredUpdate && bypassedRequiredUpdateVersion === appUpdate?.latestVersion
 
   // Treat any update (optional or required) as a blocking update for this app.
-  // Use appUpdateStatus from the store to ensure we capture server-classified updates.
-  const requiredUpdateBlocked =
-    (appUpdateStatus === 'update-available' || appUpdateStatus === 'update-required') &&
-    !allowRequiredUpdateBypass
-
-  const showOptionalUpdateDialog = Boolean(
+  // Once the user clicks "Update", we stay on this screen through downloading and ready-to-restart stages.
+  const requiredUpdateBlocked = Boolean(
     appUpdate &&
-    !requiredUpdateBlocked &&
-    (appUpdateStatus === 'downloading' ||
+    (appUpdateStatus === 'update-available' ||
+      appUpdateStatus === 'update-required' ||
+      appUpdateStatus === 'downloading' ||
       appUpdateStatus === 'ready-to-restart' ||
-      (appUpdateStatus === 'failed' &&
-        (Boolean(appUpdate.latestVersion || appUpdate.selectedAssetUrl) ||
-          appUpdate.status === 'failed'))),
+      (appUpdateStatus === 'failed' && Boolean(appUpdate.latestVersion || appUpdate.selectedAssetUrl))) &&
+    !allowRequiredUpdateBypass
   )
+  try {
+    const needsSetup = !bootstrap.settings.setupCompleted || !bootstrap.settings.obsPath
 
-  // Trace the decision path for the update modal
-  if (import.meta.env.DEV || bootstrap.settings.developerMode) {
+    return (
+      <>
+        {requiredUpdateBlocked && appUpdate ? (
+          <RequiredUpdateScreen
+            canBypass={canBypassRequiredUpdate}
+            isApplying={isApplyingAppUpdate}
+            onBypass={() => setBypassedRequiredUpdateVersion(appUpdate.latestVersion ?? '__dev__')}
+            onDownload={() => {
+              void downloadAppUpdate()
+            }}
+            onInstall={() => {
+              void installAppUpdate()
+            }}
+            onOpenManualFallback={
+              appUpdate.selectedAssetUrl
+                ? () => void openExternal(appUpdate.selectedAssetUrl ?? '')
+                : undefined
+            }
+            onRetry={() => {
+              void checkForAppUpdate({ forcePrompt: true })
+            }}
+            progress={appUpdateProgress}
+            snapshot={appUpdate}
+            status={appUpdateStatus}
+          />
+        ) : needsSetup ? (
+          <SetupWizard
+            detection={bootstrap.obsDetection}
+            isBusy={isSetupWorking}
+            onAcceptDetectedPath={saveObsPath}
+            onChooseDirectory={chooseObsDirectory}
+            onDetectAgain={detectObs}
+          />
+        ) : (
+          <HashRouter>
+            <Routes>
+              <Route element={<AppShell />} path="/">
+                <Route element={<DashboardPage />} index />
+                <Route element={<DiagnosticsPage />} path="diagnostics" />
+                <Route element={<DiscoverPage />} path="plugins" />
+                <Route element={<InstalledPage />} path="installed" />
+                <Route element={<UpdatesPage />} path="updates" />
+                <Route element={<SettingsPage />} path="settings" />
+                <Route element={<FeedbackPage />} path="feedback" />
+                <Route element={<PluginDetailsPage />} path="plugin/:pluginId" />
+              </Route>
+            </Routes>
+          </HashRouter>
+        )}
+        <Toaster position="top-right" richColors theme={toasterTheme} />
+      </>
+    )
+  } catch (error) {
     // eslint-disable-next-line no-console
-    console.debug('[App] Update state:', {
-      appUpdateStatus,
-      requiredUpdateBlocked,
-      showOptionalUpdateDialog,
-      latestVersion: appUpdate?.latestVersion,
-      dismissedVersion: dismissedAppUpdateVersion,
-      minimumSupportedVersion: appUpdate?.minimumSupportedVersion,
-      hasSelectedAsset: Boolean(appUpdate?.selectedAssetUrl),
-    })
+    console.error('[App] Render error:', error)
+    return (
+      <div className="p-10 text-red-500">
+        <h1>Render Error</h1>
+        <pre>{error instanceof Error ? error.stack : String(error)}</pre>
+      </div>
+    )
   }
-
-  const needsSetup =
-    !bootstrap.settings.setupCompleted || !bootstrap.settings.obsPath
-
-  return (
-    <>
-      {requiredUpdateBlocked && appUpdate ? (
-        <RequiredUpdateScreen
-          canBypass={canBypassRequiredUpdate}
-          isApplying={isApplyingAppUpdate}
-          onBypass={() => setBypassedRequiredUpdateVersion(appUpdate.latestVersion ?? '__dev__')}
-          onDownload={() => {
-            void downloadAppUpdate()
-          }}
-          onInstall={() => {
-            void installAppUpdate()
-          }}
-          onOpenManualFallback={
-            appUpdate.selectedAssetUrl
-              ? () => void openExternal(appUpdate.selectedAssetUrl ?? '')
-              : undefined
-          }
-          onRetry={() => {
-            void checkForAppUpdate({ forcePrompt: true })
-          }}
-          progress={appUpdateProgress}
-          snapshot={appUpdate}
-          status={appUpdateStatus}
-        />
-      ) : needsSetup ? (
-        <SetupWizard
-          detection={bootstrap.obsDetection}
-          isBusy={isSetupWorking}
-          onAcceptDetectedPath={saveObsPath}
-          onChooseDirectory={chooseObsDirectory}
-          onDetectAgain={detectObs}
-        />
-      ) : (
-        <HashRouter>
-          <Routes>
-            <Route element={<AppShell />} path="/">
-              <Route element={<DashboardPage />} index />
-              <Route element={<DiagnosticsPage />} path="diagnostics" />
-              <Route element={<DiscoverPage />} path="plugins" />
-              <Route element={<InstalledPage />} path="installed" />
-              <Route element={<UpdatesPage />} path="updates" />
-              <Route element={<SettingsPage />} path="settings" />
-              <Route element={<FeedbackPage />} path="feedback" />
-              <Route element={<PluginDetailsPage />} path="plugin/:pluginId" />
-            </Route>
-          </Routes>
-        </HashRouter>
-      )}
-      {showOptionalUpdateDialog && appUpdate ? (
-        <AppUpdateDialog
-          isApplying={isApplyingAppUpdate}
-          onDismiss={dismissAppUpdate}
-          onDownload={() => {
-            void downloadAppUpdate()
-          }}
-          onInstall={() => {
-            void installAppUpdate()
-          }}
-          onOpenManualFallback={
-            appUpdate.selectedAssetUrl
-              ? () => void openExternal(appUpdate.selectedAssetUrl ?? '')
-              : undefined
-          }
-          onRetry={() => {
-            void checkForAppUpdate({ forcePrompt: true })
-          }}
-          progress={appUpdateProgress}
-          snapshot={appUpdate}
-          status={appUpdateStatus}
-        />
-      ) : null}
-      <Toaster position="top-right" richColors theme={toasterTheme} />
-    </>
-  )
 }
 
 export default App

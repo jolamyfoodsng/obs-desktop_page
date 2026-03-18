@@ -87,26 +87,26 @@ export function RequiredUpdateScreen({
               <p className="mt-4 text-sm leading-6 text-slate-400">{snapshot.selectedAssetReason}</p>
             ) : null}
 
-            <div className="mt-5">
-              <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                <span>{status === 'downloading' ? 'Downloading update' : 'Update status'}</span>
-                <span>
-                  {status === 'ready-to-restart'
-                    ? '100%'
-                    : progress?.progressPercent
-                      ? `${Math.round(progress.progressPercent)}%`
-                      : status === 'downloading'
-                        ? 'Working...'
-                        : 'Pending'}
-                </span>
+            {status === 'downloading' || status === 'ready-to-restart' ? (
+              <div className="mt-5">
+                <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                  <span>{status === 'ready-to-restart' ? 'Update ready' : 'Downloading update'}</span>
+                  <span>
+                    {status === 'ready-to-restart'
+                      ? '100%'
+                      : progress?.progressPercent
+                        ? `${Math.round(progress.progressPercent)}%`
+                        : 'Working...'}
+                  </span>
+                </div>
+                <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/[0.08]">
+                  <div
+                    className="h-full rounded-full bg-primary transition-all duration-300"
+                    style={{ width: `${progressWidth(progress, status)}%` }}
+                  />
+                </div>
               </div>
-              <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/[0.08]">
-                <div
-                  className="h-full rounded-full bg-primary transition-all"
-                  style={{ width: `${progressWidth(progress, status)}%` }}
-                />
-              </div>
-            </div>
+            ) : null}
 
             {snapshot.releaseNotes ? (
               <pre className="mt-5 max-h-56 overflow-auto whitespace-pre-wrap rounded-2xl border border-white/10 bg-[#0e1016] px-4 py-4 text-sm leading-6 text-slate-300">
@@ -119,33 +119,42 @@ export function RequiredUpdateScreen({
             <p className="text-sm font-semibold text-white">Next step</p>
             <p className="mt-2 text-sm leading-7 text-slate-400">
               {status === 'ready-to-restart'
-                ? 'The update package is downloaded and ready. Restart the app to apply it.'
+                ? 'The update package is ready. Restart the app to finish the installation.'
                 : status === 'downloading'
-                  ? 'The update is downloading inside the app. Keep this window open until it finishes.'
-                  : 'Download and apply the required update before continuing.'}
+                  ? 'Downloading the latest version. Please wait...'
+                  : 'Get the latest features and security updates for OBS Plugin Installer.'}
             </p>
 
             <div className="mt-6 space-y-2">
-              {status === 'update-required' || status === 'failed' ? (
-                <Button className="w-full justify-center" onClick={onDownload}>
+              {status === 'update-available' || status === 'update-required' || status === 'failed' ? (
+                <Button className="w-full justify-center gap-2" size="lg" onClick={onDownload}>
                   <Download className="size-4" />
                   Update now
                 </Button>
               ) : null}
 
-              {status === 'ready-to-restart' ? (
-                <Button className="w-full justify-center" disabled={isApplying} onClick={onInstall}>
-                  <Download className="size-4" />
-                  {isApplying ? 'Applying update...' : 'Restart to finish updating'}
+              {status === 'downloading' ? (
+                <Button className="w-full justify-center gap-2" disabled size="lg">
+                  <LoaderCircle className="size-4 animate-spin" />
+                  Downloading...
                 </Button>
               ) : null}
 
-              <Button className="w-full justify-center" variant="secondary" onClick={onRetry}>
-                Retry
-              </Button>
+              {status === 'ready-to-restart' ? (
+                <Button
+                  className="w-full justify-center gap-2"
+                  disabled={isApplying}
+                  size="lg"
+                  variant="primary"
+                  onClick={onInstall}
+                >
+                  <Download className="size-4" />
+                  {isApplying ? 'Installing...' : 'Restart and install'}
+                </Button>
+              ) : null}
 
               {status === 'failed' && onOpenManualFallback && snapshot.selectedAssetUrl ? (
-                <Button className="w-full justify-center" variant="secondary" onClick={onOpenManualFallback}>
+                <Button className="w-full justify-center gap-2" variant="secondary" onClick={onOpenManualFallback}>
                   <ExternalLink className="size-4" />
                   Manual download
                 </Button>
