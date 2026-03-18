@@ -7,7 +7,6 @@ import {
   PackageCheck,
   ShieldCheck,
   Stethoscope,
-  MessageSquareMore,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
