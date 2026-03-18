@@ -21,9 +21,24 @@ import type {
 const INSTALL_PROGRESS_EVENT = 'install-progress'
 const APP_UPDATE_PROGRESS_EVENT = 'app-update-progress'
 
+export interface DesktopSupportSubmissionRequest {
+  kind: string
+  email: string
+  subject?: string | null
+  message: string
+  pluginUrl?: string | null
+  obsVersion?: string | null
+  appVersion: string
+  installId: string
+  platform: string
+}
+
 export const desktopApi = {
   captureAnalyticsEvent(request: AnalyticsCaptureRequest) {
     return invoke<void>('capture_analytics_event', { request })
+  },
+  submitSupportRequest(request: DesktopSupportSubmissionRequest) {
+    return invoke<{ ok: boolean; message?: string | null }>('submit_support_request', { request })
   },
   bootstrap() {
     return invoke<BootstrapPayload>('bootstrap')
