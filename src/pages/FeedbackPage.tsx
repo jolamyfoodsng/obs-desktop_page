@@ -373,7 +373,7 @@ export function FeedbackPage() {
           </form>
         </section>
 
-
+        <aside className="space-y-5">
           <section className="rounded-[24px] border border-white/10 bg-white/[0.04] p-5">
             <div className="flex items-center gap-3 text-primary">
               <MessageSquare className="size-5" />
