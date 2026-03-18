@@ -125,53 +125,57 @@ const PLATFORM_TOKENS = {
   macos: ['macos', 'mac', 'darwin', '.app.tar.gz', '.dmg', '.pkg', 'universal'],
 } as const
 
-const PLATFORM_CONFLICTS = {
-  windows: ['linux', 'appimage', '.deb', '.rpm', 'macos', '.dmg', '.pkg', '.app.tar.gz'],
-  linux: ['windows', 'win32', 'win64', '.exe', '.msi', 'nsis', 'macos', '.dmg', '.pkg'],
-  macos: ['windows', 'win32', 'win64', '.exe', '.msi', 'nsis', 'linux', 'appimage', '.deb', '.rpm'],
-} as const
-
-const ARCH_TOKENS = {
-  x86_64: ['x86_64', 'amd64', 'x64', '64bit'],
-  aarch64: ['aarch64', 'arm64'],
-} as const
-
-const ARCH_CONFLICTS = {
-  x86_64: ['arm64', 'aarch64'],
-  aarch64: ['x86_64', 'amd64', 'x64', '64bit'],
-} as const
-
-const BUNDLE_RULES = {
+const UPDATE_SELECTION_RULES = {
   nsis: {
-    extensions: ['.exe'],
-    tokens: ['nsis', 'setup'],
-    label: 'NSIS installer',
+    format: 'exe',
+    label: 'Windows executable updater',
+    requiresSignature: true,
   },
   msi: {
-    extensions: ['.msi'],
-    tokens: ['msi'],
-    label: 'MSI installer',
+    format: 'msi',
+    label: 'Windows MSI updater',
+    requiresSignature: true,
   },
   appimage: {
-    extensions: ['.appimage'],
-    tokens: ['appimage'],
-    label: 'AppImage',
+    format: 'appimage',
+    label: 'Linux AppImage updater',
+    requiresSignature: true,
   },
   deb: {
-    extensions: ['.deb'],
-    tokens: ['deb'],
-    label: 'DEB package',
+    format: 'deb',
+    label: 'Linux DEB updater',
+    requiresSignature: true,
   },
   rpm: {
-    extensions: ['.rpm'],
-    tokens: ['rpm'],
-    label: 'RPM package',
+    format: 'rpm',
+    label: 'Linux RPM updater',
+    requiresSignature: true,
   },
   app: {
-    extensions: ['.app.tar.gz'],
-    tokens: ['.app.tar.gz', 'app.tar.gz', 'universal'],
-    label: 'macOS app bundle',
+    format: 'app_tar_gz',
+    label: 'macOS updater bundle',
+    requiresSignature: true,
   },
+} as const
+
+const FORMAT_LABELS: Record<ReleaseAssetFormat, string> = {
+  dmg: 'DMG installer',
+  app_tar_gz: 'app.tar.gz updater bundle',
+  exe: 'EXE installer',
+  msi: 'MSI installer',
+  appimage: 'AppImage',
+  deb: 'DEB package',
+  rpm: 'RPM package',
+  sig: 'signature',
+  zip: 'ZIP archive',
+  tar_gz: 'tar.gz archive',
+  other: 'file',
+}
+
+const RELEASE_ARCH_TOKENS = {
+  x64: ['x86_64', 'amd64', 'x64', '64bit'],
+  arm64: ['aarch64', 'arm64', 'arm64e'],
+  universal: ['universal', 'universal2'],
 } as const
 
 type SupportedTarget = (typeof SUPPORTED_TARGETS)[number]
@@ -229,10 +233,43 @@ interface PlatformManifestEntry {
   reason: string
 }
 
-interface SelectionResult {
+export interface SelectionResult {
   kind: 'selected' | 'missing' | 'source-only' | 'ambiguous'
   candidate?: SelectedAssetCandidate
   message?: string
+}
+
+export type ReleaseAssetOs = 'macos' | 'windows' | 'linux' | 'unknown'
+export type ReleaseAssetArch = 'x64' | 'arm64' | 'universal' | 'unknown'
+export type ReleaseAssetKind = 'updater_bundle' | 'installer' | 'signature' | 'archive' | 'source'
+export type ReleaseAssetFormat =
+  | 'dmg'
+  | 'app_tar_gz'
+  | 'exe'
+  | 'msi'
+  | 'appimage'
+  | 'deb'
+  | 'rpm'
+  | 'sig'
+  | 'zip'
+  | 'tar_gz'
+  | 'other'
+
+export interface ClassifiedReleaseAsset {
+  asset: GitHubReleaseAsset
+  os: ReleaseAssetOs
+  arch: ReleaseAssetArch
+  kind: ReleaseAssetKind
+  format: ReleaseAssetFormat
+  version: string | null
+  versionMatchesRelease: boolean
+  signatureTargetName?: string
+}
+
+export interface ReleaseAssetCatalog {
+  releaseVersion: string | null
+  assets: ClassifiedReleaseAsset[]
+  signatureAssetsByTargetName: Map<string, GitHubReleaseAsset>
 }
 
 export interface UpdateMetadataPayload {
@@ -300,13 +337,6 @@ const BUNDLE_TYPE_ALIASES = {
   app: 'app',
   'app.tar.gz': 'app',
   '.app.tar.gz': 'app',
-} as const
-
-const MANUAL_FALLBACK_RULES = {
-  macos: {
-    extensions: ['.dmg'],
-    label: 'macOS disk image',
-  },
 } as const
 
 function getEnv(name: string) {
@@ -505,11 +535,6 @@ async function fetchLatestRelease(channel: string, releaseVersion?: string) {
   return selected
 }
 
-function assetHasExtension(fileName: string, extensions: readonly string[]) {
-  const lower = fileName.toLowerCase()
-  return extensions.some((extension) => lower.endsWith(extension))
-}
-
 function hasAnyToken(fileName: string, tokens: readonly string[]) {
   const lower = fileName.toLowerCase()
   return tokens.some((token) => lower.includes(token))
@@ -539,7 +564,7 @@ function normalizeBundleType(value: string | undefined | null) {
   return BUNDLE_TYPE_ALIASES[value.trim().toLowerCase() as keyof typeof BUNDLE_TYPE_ALIASES] ?? null
 }
 
-function resolveSupportedTarget(
+export function resolveSupportedTarget(
   target: string | undefined | null,
   arch: string | undefined | null,
   bundleType: string | undefined | null,
@@ -562,247 +587,369 @@ function resolveSupportedTarget(
   )
 }
 
-function scoreAssetCandidate(
-  target: SupportedTarget,
-  asset: GitHubReleaseAsset,
-  signatureAsset: GitHubReleaseAsset | undefined,
-  releaseVersion: string,
-) {
-  const fileName = asset.name.toLowerCase()
+function formatFromFileName(fileName: string): ReleaseAssetFormat {
+  const lower = fileName.toLowerCase()
 
-  if (isSourceOnlyAsset(asset.name)) {
-    return { reason: 'source archive or checksum asset', score: -1 }
+  if (lower.endsWith('.sig')) {
+    return 'sig'
+  }
+  if (lower.endsWith('.app.tar.gz')) {
+    return 'app_tar_gz'
+  }
+  if (lower.endsWith('.dmg')) {
+    return 'dmg'
+  }
+  if (lower.endsWith('.exe')) {
+    return 'exe'
+  }
+  if (lower.endsWith('.msi')) {
+    return 'msi'
+  }
+  if (lower.endsWith('.appimage')) {
+    return 'appimage'
+  }
+  if (lower.endsWith('.deb')) {
+    return 'deb'
+  }
+  if (lower.endsWith('.rpm')) {
+    return 'rpm'
+  }
+  if (lower.endsWith('.tar.gz') || lower.endsWith('.tgz')) {
+    return 'tar_gz'
+  }
+  if (lower.endsWith('.zip')) {
+    return 'zip'
   }
 
-  const bundleRule = BUNDLE_RULES[target.bundleType]
-  if (!assetHasExtension(fileName, bundleRule.extensions)) {
-    return { reason: `not a ${bundleRule.label}`, score: -1 }
+  return 'other'
+}
+
+function osFromTokens(fileName: string): ReleaseAssetOs {
+  const matches = (Object.keys(PLATFORM_TOKENS) as Array<keyof typeof PLATFORM_TOKENS>).filter((platform) =>
+    hasAnyToken(fileName, PLATFORM_TOKENS[platform]),
+  )
+
+  if (matches.length === 1) {
+    return matches[0]
   }
 
-  const conflictTokens = PLATFORM_CONFLICTS[target.target]
-  if (hasAnyToken(fileName, conflictTokens)) {
-    return { reason: `conflicts with ${target.target}`, score: -1 }
-  }
+  return 'unknown'
+}
 
-  const conflictingArchTokens = ARCH_CONFLICTS[target.arch]
-  if (hasAnyToken(fileName, conflictingArchTokens)) {
-    return { reason: `conflicts with ${target.arch}`, score: -1 }
-  }
-
-  // Check for signature only AFTER we've confirmed the asset matches the target platform.
-  // This makes diagnostics more accurate and less confusing.
-  if (!signatureAsset) {
-    return { reason: 'missing updater signature', score: -1 }
-  }
-
-  let score = 0
-  const reasons: string[] = []
-
-  score += 60
-  reasons.push(bundleRule.label)
-
-  if (hasAnyToken(fileName, PLATFORM_TOKENS[target.target])) {
-    score += 28
-    reasons.push(target.label)
-  } else if (target.target === 'windows' || target.target === 'linux') {
-    score += 12
-  }
-
-  if (hasAnyToken(fileName, ARCH_TOKENS[target.arch])) {
-    score += 30
-    reasons.push(target.arch === 'x86_64' ? 'x64' : 'ARM64')
-  } else if (target.target === 'macos' && fileName.includes('universal')) {
-    score += 22
-    reasons.push('universal')
-  } else {
-    score += 6
-  }
-
-  if (hasAnyToken(fileName, bundleRule.tokens)) {
-    score += 12
-  }
-
-  const assetVersion = normalizeVersion(asset.name)
-  if (assetVersion && assetVersion !== releaseVersion) {
-    return { reason: `version ${assetVersion} does not match release ${releaseVersion}`, score: -1 }
-  }
-
-  if (assetVersion) {
-    score += 10
-  }
-
-  return {
-    score,
-    reason: `best match for ${reasons.join(' ')}`.replace(/\s+/g, ' ').trim(),
+function osFromFormat(format: ReleaseAssetFormat, fileName: string): ReleaseAssetOs {
+  switch (format) {
+    case 'app_tar_gz':
+    case 'dmg':
+      return 'macos'
+    case 'exe':
+    case 'msi':
+      return 'windows'
+    case 'appimage':
+    case 'deb':
+    case 'rpm':
+      return 'linux'
+    default:
+      return osFromTokens(fileName)
   }
 }
 
-function resolveSelectionForTarget(release: GitHubRelease, target: SupportedTarget): SelectionResult {
-  const releaseVersion = normalizeVersion(release.tag_name) ?? normalizeVersion(release.name)
-  const signatureAssets = new Map(
-    release.assets
-      .filter((asset) => asset.name.toLowerCase().endsWith('.sig'))
-      .map((asset) => [asset.name.slice(0, -4).toLowerCase(), asset] as const),
-  )
-
-  const nonSignatureAssets = release.assets.filter((asset) => !asset.name.toLowerCase().endsWith('.sig'))
-  const installableAssets = nonSignatureAssets.filter((asset) => !isSourceOnlyAsset(asset.name))
-  const diagnostics = nonSignatureAssets.map((asset) => ({
-    asset: asset.name,
-    signature: Boolean(signatureAssets.get(asset.name.toLowerCase())),
-    sourceOnly: isSourceOnlyAsset(asset.name),
-  }))
-
-  if (installableAssets.length === 0) {
-    console.warn('[update-api] no installable assets for target', {
-      target: target.key,
-      diagnostics,
-    })
-    return {
-      kind: nonSignatureAssets.length > 0 ? 'source-only' : 'missing',
-      message: `The latest GitHub release only includes source or non-installable assets for ${target.label}.`,
-    }
+function archFromFormatAndTokens(
+  format: ReleaseAssetFormat,
+  fileName: string,
+  os: ReleaseAssetOs,
+): ReleaseAssetArch {
+  if (hasAnyToken(fileName, RELEASE_ARCH_TOKENS.universal)) {
+    return 'universal'
+  }
+  if (hasAnyToken(fileName, RELEASE_ARCH_TOKENS.arm64)) {
+    return 'arm64'
+  }
+  if (hasAnyToken(fileName, RELEASE_ARCH_TOKENS.x64)) {
+    return 'x64'
+  }
+  if (format === 'app_tar_gz' && os === 'macos') {
+    return 'universal'
   }
 
-  const scored = installableAssets
+  return 'unknown'
+}
+
+function kindFromFormat(format: ReleaseAssetFormat, fileName: string): ReleaseAssetKind {
+  if (format === 'sig') {
+    return 'signature'
+  }
+  if (isSourceOnlyAsset(fileName)) {
+    return 'source'
+  }
+  if (format === 'app_tar_gz') {
+    return 'updater_bundle'
+  }
+  if (format === 'dmg' || format === 'exe' || format === 'msi' || format === 'appimage' || format === 'deb' || format === 'rpm') {
+    return 'installer'
+  }
+
+  return 'archive'
+}
+
+export function classifyReleaseAsset(
+  asset: GitHubReleaseAsset,
+  releaseVersion?: string | null,
+): ClassifiedReleaseAsset {
+  const format = formatFromFileName(asset.name)
+  const kind = kindFromFormat(format, asset.name)
+  const os = kind === 'signature' ? 'unknown' : osFromFormat(format, asset.name.toLowerCase())
+  const arch = kind === 'signature' ? 'unknown' : archFromFormatAndTokens(format, asset.name.toLowerCase(), os)
+  const version = normalizeVersion(asset.name)
+
+  return {
+    asset,
+    os,
+    arch,
+    kind,
+    format,
+    version,
+    versionMatchesRelease: !releaseVersion || !version || version === releaseVersion,
+    signatureTargetName: format === 'sig' ? asset.name.slice(0, -4).toLowerCase() : undefined,
+  }
+}
+
+export function buildReleaseAssetCatalog(
+  release: Pick<GitHubRelease, 'assets' | 'tag_name' | 'name'>,
+): ReleaseAssetCatalog {
+  const releaseVersion = normalizeVersion(release.tag_name) ?? normalizeVersion(release.name)
+  const assets = release.assets.map((asset) => classifyReleaseAsset(asset, releaseVersion))
+  const signatureAssetsByTargetName = new Map(
+    assets
+      .filter((asset): asset is ClassifiedReleaseAsset & { signatureTargetName: string } => Boolean(asset.signatureTargetName))
+      .map((asset) => [asset.signatureTargetName, asset.asset] as const),
+  )
+
+  return {
+    releaseVersion,
+    assets,
+    signatureAssetsByTargetName,
+  }
+}
+
+function targetArch(target: SupportedTarget): ReleaseAssetArch {
+  return target.arch === 'aarch64' ? 'arm64' : 'x64'
+}
+
+function archCompatibilityScore(assetArch: ReleaseAssetArch, target: SupportedTarget) {
+  const wantedArch = targetArch(target)
+
+  if (assetArch === wantedArch) {
+    return 3
+  }
+  if (assetArch === 'universal' && target.target === 'macos') {
+    return 2
+  }
+  if (assetArch === 'unknown') {
+    return 1
+  }
+
+  return -1
+}
+
+function isInstallableAsset(asset: ClassifiedReleaseAsset) {
+  return asset.kind === 'updater_bundle' || asset.kind === 'installer'
+}
+
+function findExactSignature(
+  catalog: ReleaseAssetCatalog,
+  asset: ClassifiedReleaseAsset,
+) {
+  return catalog.signatureAssetsByTargetName.get(asset.asset.name.toLowerCase())
+}
+
+function manualFormatPriority(target: SupportedTarget): ReleaseAssetFormat[] {
+  if (target.target === 'macos') {
+    return ['dmg']
+  }
+
+  if (target.target === 'windows') {
+    return ['exe', 'msi']
+  }
+
+  if (target.bundleType === 'deb') {
+    return ['deb', 'appimage']
+  }
+
+  if (target.bundleType === 'appimage') {
+    return ['appimage', 'deb']
+  }
+
+  if (target.bundleType === 'rpm') {
+    return ['appimage', 'deb', 'rpm']
+  }
+
+  return ['appimage', 'deb']
+}
+
+function compatibleTargetAssets(catalog: ReleaseAssetCatalog, target: SupportedTarget) {
+  return catalog.assets.filter(
+    (asset) =>
+      isInstallableAsset(asset) &&
+      asset.versionMatchesRelease &&
+      asset.os === target.target,
+  )
+}
+
+function buildUpdateSelectionReason(target: SupportedTarget, asset: ClassifiedReleaseAsset) {
+  const archNote =
+    asset.arch === 'unknown'
+      ? 'generic arch'
+      : asset.arch === 'universal'
+        ? 'universal'
+        : asset.arch
+
+  return `selected signed ${FORMAT_LABELS[asset.format]} for ${target.label} (${archNote})`
+}
+
+function buildManualFallbackReason(target: SupportedTarget, asset: ClassifiedReleaseAsset) {
+  const archNote =
+    asset.arch === 'unknown'
+      ? 'generic arch'
+      : asset.arch === 'universal'
+        ? 'universal'
+        : asset.arch
+
+  return `manual fallback via ${FORMAT_LABELS[asset.format]} for ${target.label} (${archNote})`
+}
+
+function buildMissingSelectionMessage(
+  catalog: ReleaseAssetCatalog,
+  target: SupportedTarget,
+): string {
+  const installableAssets = catalog.assets.filter(isInstallableAsset)
+  const matchingOsAssets = compatibleTargetAssets(catalog, target)
+  const updateRule = UPDATE_SELECTION_RULES[target.bundleType]
+  const matchingFormatAssets = matchingOsAssets.filter((asset) => asset.format === updateRule.format)
+  const matchingFormatWrongArch = matchingFormatAssets.filter((asset) => archCompatibilityScore(asset.arch, target) < 0)
+  const matchingFormatCompatibleArch = matchingFormatAssets.filter((asset) => archCompatibilityScore(asset.arch, target) >= 0)
+  const manualCandidate = resolveManualFallbackForTarget(catalog, target)
+
+  if (installableAssets.length === 0) {
+    return `The latest GitHub release only includes source or non-installable assets for ${target.label}.`
+  }
+
+  if (matchingOsAssets.length === 0) {
+    return `No compatible asset for ${target.label} was found in the latest GitHub release.`
+  }
+
+  if (matchingFormatAssets.length === 0) {
+    if (manualCandidate) {
+      return `Only manual installer assets exist for ${target.label}.`
+    }
+
+    const wrongArchOsAssets = matchingOsAssets.filter((asset) => archCompatibilityScore(asset.arch, target) < 0)
+    if (wrongArchOsAssets.length > 0) {
+      return `Compatible ${target.target} assets were found, but only for the wrong architecture.`
+    }
+    return `No compatible in-app update asset was found for ${target.label}.`
+  }
+
+  if (matchingFormatCompatibleArch.length === 0 && matchingFormatWrongArch.length > 0) {
+    return `Compatible ${target.target} updater assets were found, but only for the wrong architecture.`
+  }
+
+  if (matchingFormatCompatibleArch.some((asset) => !findExactSignature(catalog, asset))) {
+    return `A compatible ${updateRule.label} exists for ${target.label}, but its signature is missing.`
+  }
+
+  if (manualCandidate) {
+    return `Only manual installer assets exist for ${target.label}.`
+  }
+
+  return `No compatible asset for ${target.label} was found in the latest GitHub release.`
+}
+
+export function resolveSelectionForTarget(
+  catalog: ReleaseAssetCatalog,
+  target: SupportedTarget,
+): SelectionResult {
+  const installableAssets = catalog.assets.filter(isInstallableAsset)
+  const updateRule = UPDATE_SELECTION_RULES[target.bundleType]
+  const candidates = compatibleTargetAssets(catalog, target)
+    .filter((asset) => asset.format === updateRule.format)
     .map((asset) => {
-      const signatureAsset = signatureAssets.get(asset.name.toLowerCase())
-      const result = scoreAssetCandidate(target, asset, signatureAsset, releaseVersion ?? '0.0.0')
-      if (result.score < 0 || !signatureAsset) {
+      const signatureAsset = findExactSignature(catalog, asset)
+      if (!signatureAsset) {
         console.info('[update-api] asset rejected', {
           target: target.key,
-          asset: asset.name,
-          reason: result.reason,
+          asset: asset.asset.name,
+          reason: 'missing updater signature',
+        })
+        return null
+      }
+
+      const archScore = archCompatibilityScore(asset.arch, target)
+      if (archScore < 0) {
+        console.info('[update-api] asset rejected', {
+          target: target.key,
+          asset: asset.asset.name,
+          reason: `wrong architecture for ${target.label}`,
         })
         return null
       }
 
       return {
-        asset,
+        asset: asset.asset,
         signatureAsset,
-        score: result.score,
-        reason: result.reason,
+        score: archScore * 100 + (asset.version ? 10 : 0),
+        reason: buildUpdateSelectionReason(target, asset),
       }
     })
     .filter((entry): entry is SelectedAssetCandidate => Boolean(entry))
     .sort((left, right) => right.score - left.score || left.asset.name.localeCompare(right.asset.name))
 
-  if (scored.length === 0) {
-    console.warn('[update-api] no scored assets for target', {
-      target: target.key,
-      diagnostics,
-    })
+  if (installableAssets.length === 0) {
     return {
-      kind: 'missing',
-      message: `No ${target.reasonLabel} installable asset was found in the latest GitHub release.`,
+      kind: catalog.assets.some((asset) => asset.kind === 'source') ? 'source-only' : 'missing',
+      message: buildMissingSelectionMessage(catalog, target),
     }
   }
 
-  if (scored.length > 1) {
-    const [best, runnerUp] = scored
-    if (best.score - runnerUp.score < 10) {
-      console.warn('[update-api] asset selection ambiguous', {
-        target: target.key,
-        best: best.asset.name,
-        runnerUp: runnerUp.asset.name,
-      })
-      return {
-        kind: 'ambiguous',
-        message: `Multiple ${target.reasonLabel} assets looked valid, so the server did not choose one automatically.`,
-      }
+  if (candidates.length === 0) {
+    return {
+      kind: 'missing',
+      message: buildMissingSelectionMessage(catalog, target),
     }
   }
 
   console.info('[update-api] asset selected', {
     target: target.key,
-    asset: scored[0].asset.name,
-    reason: scored[0].reason,
+    asset: candidates[0].asset.name,
+    reason: candidates[0].reason,
   })
 
   return {
     kind: 'selected',
-    candidate: scored[0],
+    candidate: candidates[0],
   }
 }
 
-function scoreManualFallbackCandidate(
-  target: SupportedTarget,
-  asset: GitHubReleaseAsset,
-  releaseVersion: string,
-) {
-  if (target.target !== 'macos') {
-    return { reason: 'manual fallback is not configured for this target', score: -1 }
-  }
-
-  const fileName = asset.name.toLowerCase()
-  const rule = MANUAL_FALLBACK_RULES[target.target]
-
-  if (isSourceOnlyAsset(asset.name)) {
-    return { reason: 'source archive or checksum asset', score: -1 }
-  }
-
-  if (!assetHasExtension(fileName, rule.extensions)) {
-    return { reason: `not a ${rule.label}`, score: -1 }
-  }
-
-  if (hasAnyToken(fileName, PLATFORM_CONFLICTS[target.target])) {
-    return { reason: `conflicts with ${target.target}`, score: -1 }
-  }
-
-  if (hasAnyToken(fileName, ARCH_CONFLICTS[target.arch])) {
-    return { reason: `conflicts with ${target.arch}`, score: -1 }
-  }
-
-  let score = 0
-  const reasons: string[] = [rule.label]
-
-  score += 50
-
-  if (hasAnyToken(fileName, ARCH_TOKENS[target.arch])) {
-    score += 30
-    reasons.push(target.arch === 'x86_64' ? 'x64' : 'ARM64')
-  } else {
-    score += 10
-    reasons.push('generic build')
-  }
-
-  const assetVersion = normalizeVersion(asset.name)
-  if (assetVersion && assetVersion !== releaseVersion) {
-    return { reason: `version ${assetVersion} does not match release ${releaseVersion}`, score: -1 }
-  }
-
-  if (assetVersion) {
-    score += 10
-  }
-
-  return {
-    score,
-    reason: `manual fallback via ${reasons.join(' ')}`.replace(/\s+/g, ' ').trim(),
-  }
-}
-
-function resolveManualFallbackForTarget(
-  release: GitHubRelease,
+export function resolveManualFallbackForTarget(
+  catalog: ReleaseAssetCatalog,
   target: SupportedTarget,
 ): ManualFallbackCandidate | null {
-  if (target.target !== 'macos') {
-    return null
-  }
-
-  const releaseVersion = normalizeVersion(release.tag_name) ?? normalizeVersion(release.name) ?? '0.0.0'
-
-  const candidates = release.assets
-    .filter((asset) => !asset.name.toLowerCase().endsWith('.sig'))
+  const formatPriority = manualFormatPriority(target)
+  const candidates = compatibleTargetAssets(catalog, target)
+    .filter((asset) => asset.kind === 'installer')
+    .filter((asset) => formatPriority.includes(asset.format))
     .map((asset) => {
-      const result = scoreManualFallbackCandidate(target, asset, releaseVersion)
-      if (result.score < 0) {
+      const archScore = archCompatibilityScore(asset.arch, target)
+      if (archScore < 0) {
         return null
       }
 
       return {
-        asset,
-        score: result.score,
-        reason: result.reason,
+        asset: asset.asset,
+        score:
+          (formatPriority.length - formatPriority.indexOf(asset.format)) * 100 +
+          archScore * 10 +
+          (asset.version ? 1 : 0),
+        reason: buildManualFallbackReason(target, asset),
       }
     })
     .filter((entry): entry is ManualFallbackCandidate => Boolean(entry))
@@ -810,17 +957,6 @@ function resolveManualFallbackForTarget(
 
   if (candidates.length === 0) {
     return null
-  }
-
-  if (candidates.length > 1) {
-    const [best, runnerUp] = candidates
-    if (best.score - runnerUp.score < 10) {
-      console.warn('[update-api] manual fallback selection ambiguous', {
-        target: target.key,
-        best: best.asset.name,
-        runnerUp: runnerUp.asset.name,
-      })
-    }
   }
 
   return candidates[0]
@@ -904,8 +1040,10 @@ export async function resolveUpdateCatalog(
     assets: release.assets.map((asset) => asset.name),
   })
 
+  const catalog = buildReleaseAssetCatalog(release)
+
   const selectionResults = new Map(
-    SUPPORTED_TARGETS.map((target) => [target.key, resolveSelectionForTarget(release, target)] as const),
+    SUPPORTED_TARGETS.map((target) => [target.key, resolveSelectionForTarget(catalog, target)] as const),
   )
 
   const signatureCache = new Map<string, Promise<string>>()
@@ -964,7 +1102,7 @@ export async function resolveUpdateCatalog(
     const selectedTarget = resolveSupportedTarget(options.target, options.arch, options.bundleType)
     const selectedKey = selectedTarget?.key ?? `${options.target}-${options.arch}-${options.bundleType}`
     const selectedPlatform = selectedTarget ? platforms[selectedKey] : undefined
-    const manualFallback = selectedTarget ? resolveManualFallbackForTarget(release, selectedTarget) : null
+    const manualFallback = selectedTarget ? resolveManualFallbackForTarget(catalog, selectedTarget) : null
     payload.currentVersion = currentVersion
     payload.selectedPlatform = selectedKey
 

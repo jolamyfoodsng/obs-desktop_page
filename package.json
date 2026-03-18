@@ -1,7 +1,7 @@
 {
   "name": "obs-desktop",
   "private": true,
-  "version": "0.28.0",
+  "version": "0.29.0",
   "type": "module",
   "scripts": {
     "check:release-version": "node scripts/check-release-version.mjs",
@@ -24,6 +24,7 @@
     "release:patch": "npm run version:patch && node scripts/push-version-commit.cjs",
     "release:minor": "npm run version:minor && node scripts/push-version-commit.cjs",
     "release:major": "npm run version:major && node scripts/push-version-commit.cjs",
+    "test": "node --test api/_lib/update-server.test.ts",
     "typecheck": "tsc -b",
     "tauri": "tauri"
   },
