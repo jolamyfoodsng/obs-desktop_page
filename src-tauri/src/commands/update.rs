@@ -40,6 +40,10 @@ struct UpdateMetadataResponse {
     selected_asset_reason: Option<String>,
     selected_asset_url: Option<String>,
     selected_asset_size: Option<u64>,
+    manual_fallback_name: Option<String>,
+    manual_fallback_reason: Option<String>,
+    manual_fallback_url: Option<String>,
+    manual_fallback_size: Option<u64>,
 }
 
 struct UpdateClientSelection {
@@ -145,6 +149,10 @@ fn disabled_snapshot(app: &AppHandle, channel: String, message: impl Into<String
         selected_asset_reason: None,
         selected_asset_url: None,
         selected_asset_size: None,
+        manual_fallback_name: None,
+        manual_fallback_reason: None,
+        manual_fallback_url: None,
+        manual_fallback_size: None,
     }
 }
 
@@ -181,6 +189,10 @@ fn snapshot_from_metadata(app: &AppHandle, metadata: UpdateMetadataResponse) -> 
         selected_asset_reason: metadata.selected_asset_reason,
         selected_asset_url: metadata.selected_asset_url,
         selected_asset_size: metadata.selected_asset_size,
+        manual_fallback_name: metadata.manual_fallback_name,
+        manual_fallback_reason: metadata.manual_fallback_reason,
+        manual_fallback_url: metadata.manual_fallback_url,
+        manual_fallback_size: metadata.manual_fallback_size,
     }
 }
 
@@ -462,6 +474,10 @@ pub fn install_app_update(app: AppHandle) -> Result<AppUpdateSnapshot, String> {
         selected_asset_reason: None,
         selected_asset_url: None,
         selected_asset_size: None,
+        manual_fallback_name: None,
+        manual_fallback_reason: None,
+        manual_fallback_url: None,
+        manual_fallback_size: None,
     });
 
     update

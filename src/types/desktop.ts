@@ -197,6 +197,10 @@ export interface AppUpdateSnapshot {
   selectedAssetReason?: string | null
   selectedAssetUrl?: string | null
   selectedAssetSize?: number | null
+  manualFallbackName?: string | null
+  manualFallbackReason?: string | null
+  manualFallbackUrl?: string | null
+  manualFallbackSize?: number | null
 }
 
 export interface AppUpdateProgressEvent {

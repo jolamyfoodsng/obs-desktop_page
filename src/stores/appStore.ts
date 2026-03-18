@@ -66,7 +66,6 @@ function classifyAppUpdate(snapshot: AppUpdateSnapshot): AppUpdateStatus {
   const minimumSupportedVersion = normalizeVersion(snapshot.minimumSupportedVersion ?? null)
 
   if (!currentVersion || !latestVersion) {
-    // eslint-disable-next-line no-console
     console.debug('classifyAppUpdate: Missing version info', { currentVersion, latestVersion, status: snapshot.status })
     return snapshot.status
   }
@@ -208,7 +207,6 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
 
       // Debug: log snapshot and classification to help diagnose UI visibility issues
       // Remove or guard behind a dev flag if this is noisy in production.
-      // eslint-disable-next-line no-console
       console.debug('checkForAppUpdate: snapshot=', snapshot, 'nextStatus=', nextStatus, 'dismissed=', get().dismissedAppUpdateVersion)
 
       if (options?.forcePrompt && snapshot.latestVersion) {
@@ -267,6 +265,10 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
             selectedAssetReason: null,
             selectedAssetUrl: null,
             selectedAssetSize: null,
+            manualFallbackName: null,
+            manualFallbackReason: null,
+            manualFallbackUrl: null,
+            manualFallbackSize: null,
           },
         appUpdateStatus: 'failed',
         appUpdateProgress: null,
@@ -302,7 +304,6 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
       const nextStatus = classifyAppUpdate(snapshot)
 
       // Debug: log download result and classification
-      // eslint-disable-next-line no-console
       console.debug('downloadAppUpdate: snapshot=', snapshot, 'nextStatus=', nextStatus)
       set({
         appUpdate: snapshot,
@@ -820,7 +821,6 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   },
 
   handleAppUpdateProgress(progress) {
-    // eslint-disable-next-line no-console
     console.debug('handleAppUpdateProgress:', progress)
 
     set({

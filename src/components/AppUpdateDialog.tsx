@@ -151,7 +151,7 @@ export function AppUpdateDialog({
 
           {status === 'failed' ? (
             <>
-              {onOpenManualFallback && snapshot.selectedAssetUrl ? (
+              {onOpenManualFallback ? (
                 <Button variant="secondary" onClick={onOpenManualFallback}>
                   <ExternalLink className="size-4" />
                   Manual download

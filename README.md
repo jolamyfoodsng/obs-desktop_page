@@ -364,8 +364,10 @@ The update server expects the GitHub Release to contain signed installer assets 
 - macOS scaffold:
   - `*.app.tar.gz`
   - matching `*.sig`
+  - optional manual fallback: `*.dmg`
 
 This implementation intentionally ignores source-code archives when installable binaries exist.
+For macOS, the in-app updater is expected to use the signed `*.app.tar.gz` bundle, while manual fallback downloads can use the matching `.dmg` installer for the detected architecture.
 
 ### Push builds vs release builds
 

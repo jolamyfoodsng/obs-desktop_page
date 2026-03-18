@@ -212,6 +212,12 @@ interface SelectedAssetCandidate {
   reason: string
 }
 
+interface ManualFallbackCandidate {
+  asset: GitHubReleaseAsset
+  score: number
+  reason: string
+}
+
 interface PlatformManifestEntry {
   target: string
   arch: string
@@ -246,6 +252,10 @@ export interface UpdateMetadataPayload {
   selectedAssetReason?: string
   selectedAssetUrl?: string
   selectedAssetSize?: number
+  manualFallbackName?: string
+  manualFallbackReason?: string
+  manualFallbackUrl?: string
+  manualFallbackSize?: number
 }
 
 interface ResolveCatalogOptions {
@@ -257,6 +267,48 @@ interface ResolveCatalogOptions {
   channel?: string
   releaseVersion?: string
 }
+
+const TARGET_ALIASES = {
+  windows: 'windows',
+  win32: 'windows',
+  win64: 'windows',
+  win: 'windows',
+  linux: 'linux',
+  macos: 'macos',
+  mac: 'macos',
+  darwin: 'macos',
+  osx: 'macos',
+} as const
+
+const ARCH_ALIASES = {
+  x86_64: 'x86_64',
+  amd64: 'x86_64',
+  x64: 'x86_64',
+  'x86-64': 'x86_64',
+  aarch64: 'aarch64',
+  arm64: 'aarch64',
+  arm64e: 'aarch64',
+} as const
+
+const BUNDLE_TYPE_ALIASES = {
+  nsis: 'nsis',
+  exe: 'nsis',
+  msi: 'msi',
+  appimage: 'appimage',
+  deb: 'deb',
+  rpm: 'rpm',
+  app: 'app',
+  'app.tar.gz': 'app',
+  '.app.tar.gz': 'app',
+} as const
+
+const MANUAL_FALLBACK_RULES = {
+  macos: {
+    extensions: ['.dmg'],
+    label: 'macOS disk image',
+  },
+} as const
+
 function getEnv(name: string) {
   const value = process.env[name]?.trim()
   if (!value) {
@@ -463,10 +515,58 @@ function hasAnyToken(fileName: string, tokens: readonly string[]) {
   return tokens.some((token) => lower.includes(token))
 }
 
+function normalizeTarget(value: string | undefined | null) {
+  if (!value) {
+    return null
+  }
+
+  return TARGET_ALIASES[value.trim().toLowerCase() as keyof typeof TARGET_ALIASES] ?? null
+}
+
+function normalizeArch(value: string | undefined | null) {
+  if (!value) {
+    return null
+  }
+
+  return ARCH_ALIASES[value.trim().toLowerCase() as keyof typeof ARCH_ALIASES] ?? null
+}
+
+function normalizeBundleType(value: string | undefined | null) {
+  if (!value) {
+    return null
+  }
+
+  return BUNDLE_TYPE_ALIASES[value.trim().toLowerCase() as keyof typeof BUNDLE_TYPE_ALIASES] ?? null
+}
+
+function resolveSupportedTarget(
+  target: string | undefined | null,
+  arch: string | undefined | null,
+  bundleType: string | undefined | null,
+) {
+  const normalizedTarget = normalizeTarget(target)
+  const normalizedArch = normalizeArch(arch)
+  const normalizedBundleType = normalizeBundleType(bundleType)
+
+  if (!normalizedTarget || !normalizedArch || !normalizedBundleType) {
+    return null
+  }
+
+  return (
+    SUPPORTED_TARGETS.find(
+      (candidate) =>
+        candidate.target === normalizedTarget &&
+        candidate.arch === normalizedArch &&
+        candidate.bundleType === normalizedBundleType,
+    ) ?? null
+  )
+}
+
 function scoreAssetCandidate(
   target: SupportedTarget,
   asset: GitHubReleaseAsset,
   signatureAsset: GitHubReleaseAsset | undefined,
+  releaseVersion: string,
 ) {
   const fileName = asset.name.toLowerCase()
 
@@ -522,9 +622,13 @@ function scoreAssetCandidate(
     score += 12
   }
 
-  const version = normalizeVersion(asset.name)
-  if (version) {
-    score += 4
+  const assetVersion = normalizeVersion(asset.name)
+  if (assetVersion && assetVersion !== releaseVersion) {
+    return { reason: `version ${assetVersion} does not match release ${releaseVersion}`, score: -1 }
+  }
+
+  if (assetVersion) {
+    score += 10
   }
 
   return {
@@ -534,6 +638,7 @@ function scoreAssetCandidate(
 }
 
 function resolveSelectionForTarget(release: GitHubRelease, target: SupportedTarget): SelectionResult {
+  const releaseVersion = normalizeVersion(release.tag_name) ?? normalizeVersion(release.name)
   const signatureAssets = new Map(
     release.assets
       .filter((asset) => asset.name.toLowerCase().endsWith('.sig'))
@@ -562,7 +667,7 @@ function resolveSelectionForTarget(release: GitHubRelease, target: SupportedTarg
   const scored = installableAssets
     .map((asset) => {
       const signatureAsset = signatureAssets.get(asset.name.toLowerCase())
-      const result = scoreAssetCandidate(target, asset, signatureAsset)
+      const result = scoreAssetCandidate(target, asset, signatureAsset, releaseVersion ?? '0.0.0')
       if (result.score < 0 || !signatureAsset) {
         console.info('[update-api] asset rejected', {
           target: target.key,
@@ -620,6 +725,107 @@ function resolveSelectionForTarget(release: GitHubRelease, target: SupportedTarg
   }
 }
 
+function scoreManualFallbackCandidate(
+  target: SupportedTarget,
+  asset: GitHubReleaseAsset,
+  releaseVersion: string,
+) {
+  if (target.target !== 'macos') {
+    return { reason: 'manual fallback is not configured for this target', score: -1 }
+  }
+
+  const fileName = asset.name.toLowerCase()
+  const rule = MANUAL_FALLBACK_RULES[target.target]
+
+  if (isSourceOnlyAsset(asset.name)) {
+    return { reason: 'source archive or checksum asset', score: -1 }
+  }
+
+  if (!assetHasExtension(fileName, rule.extensions)) {
+    return { reason: `not a ${rule.label}`, score: -1 }
+  }
+
+  if (hasAnyToken(fileName, PLATFORM_CONFLICTS[target.target])) {
+    return { reason: `conflicts with ${target.target}`, score: -1 }
+  }
+
+  if (hasAnyToken(fileName, ARCH_CONFLICTS[target.arch])) {
+    return { reason: `conflicts with ${target.arch}`, score: -1 }
+  }
+
+  let score = 0
+  const reasons: string[] = [rule.label]
+
+  score += 50
+
+  if (hasAnyToken(fileName, ARCH_TOKENS[target.arch])) {
+    score += 30
+    reasons.push(target.arch === 'x86_64' ? 'x64' : 'ARM64')
+  } else {
+    score += 10
+    reasons.push('generic build')
+  }
+
+  const assetVersion = normalizeVersion(asset.name)
+  if (assetVersion && assetVersion !== releaseVersion) {
+    return { reason: `version ${assetVersion} does not match release ${releaseVersion}`, score: -1 }
+  }
+
+  if (assetVersion) {
+    score += 10
+  }
+
+  return {
+    score,
+    reason: `manual fallback via ${reasons.join(' ')}`.replace(/\s+/g, ' ').trim(),
+  }
+}
+
+function resolveManualFallbackForTarget(
+  release: GitHubRelease,
+  target: SupportedTarget,
+): ManualFallbackCandidate | null {
+  if (target.target !== 'macos') {
+    return null
+  }
+
+  const releaseVersion = normalizeVersion(release.tag_name) ?? normalizeVersion(release.name) ?? '0.0.0'
+
+  const candidates = release.assets
+    .filter((asset) => !asset.name.toLowerCase().endsWith('.sig'))
+    .map((asset) => {
+      const result = scoreManualFallbackCandidate(target, asset, releaseVersion)
+      if (result.score < 0) {
+        return null
+      }
+
+      return {
+        asset,
+        score: result.score,
+        reason: result.reason,
+      }
+    })
+    .filter((entry): entry is ManualFallbackCandidate => Boolean(entry))
+    .sort((left, right) => right.score - left.score || left.asset.name.localeCompare(right.asset.name))
+
+  if (candidates.length === 0) {
+    return null
+  }
+
+  if (candidates.length > 1) {
+    const [best, runnerUp] = candidates
+    if (best.score - runnerUp.score < 10) {
+      console.warn('[update-api] manual fallback selection ambiguous', {
+        target: target.key,
+        best: best.asset.name,
+        runnerUp: runnerUp.asset.name,
+      })
+    }
+  }
+
+  return candidates[0]
+}
+
 async function fetchSignature(asset: GitHubReleaseAsset) {
   const token = getOptionalEnv('GITHUB_TOKEN')
 
@@ -647,12 +853,16 @@ function buildDownloadUrl(
   target: SupportedTarget,
   version: string,
   channel: string,
+  options?: { assetName?: string },
 ) {
   const url = new URL(
     `/api/download/${target.target}/${target.arch}/${target.bundleType}/${encodeURIComponent(version)}`,
     `${baseUrl}/`,
   )
   url.searchParams.set('channel', channel)
+  if (options?.assetName) {
+    url.searchParams.set('assetName', options.assetName)
+  }
   return url.toString()
 }
 
@@ -751,10 +961,21 @@ export async function resolveUpdateCatalog(
 
   if (options.currentVersion && options.target && options.arch && options.bundleType) {
     const currentVersion = normalizeVersion(options.currentVersion) ?? options.currentVersion
-    const selectedKey = `${options.target}-${options.arch}-${options.bundleType}`
-    const selectedPlatform = platforms[selectedKey]
+    const selectedTarget = resolveSupportedTarget(options.target, options.arch, options.bundleType)
+    const selectedKey = selectedTarget?.key ?? `${options.target}-${options.arch}-${options.bundleType}`
+    const selectedPlatform = selectedTarget ? platforms[selectedKey] : undefined
+    const manualFallback = selectedTarget ? resolveManualFallbackForTarget(release, selectedTarget) : null
     payload.currentVersion = currentVersion
     payload.selectedPlatform = selectedKey
+
+    if (manualFallback && selectedTarget) {
+      payload.manualFallbackName = manualFallback.asset.name
+      payload.manualFallbackReason = manualFallback.reason
+      payload.manualFallbackUrl = buildDownloadUrl(baseUrl, selectedTarget, latestVersion, channel, {
+        assetName: manualFallback.asset.name,
+      })
+      payload.manualFallbackSize = manualFallback.asset.size
+    }
 
     if (compareVersions(currentVersion, latestVersion) >= 0) {
       payload.status = 'no-update'
@@ -763,7 +984,7 @@ export async function resolveUpdateCatalog(
     }
 
     if (!selectedPlatform) {
-      const selection = selectionResults.get(selectedKey as SupportedTarget['key'])
+      const selection = selectedTarget ? selectionResults.get(selectedTarget.key) : undefined
       const fallbackStatus: UpdateStatus =
         selection?.kind === 'source-only'
           ? 'source-only'

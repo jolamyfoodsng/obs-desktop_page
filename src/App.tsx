@@ -319,13 +319,12 @@ function App() {
       appUpdateStatus === 'downloading' ||
       appUpdateStatus === 'ready-to-restart' ||
       (appUpdateStatus === 'failed' &&
-        (Boolean(appUpdate.latestVersion || appUpdate.selectedAssetUrl) ||
+        (Boolean(appUpdate.latestVersion || appUpdate.manualFallbackUrl || appUpdate.selectedAssetUrl) ||
           appUpdate.status === 'failed'))),
   )
 
   // Trace the decision path for the update modal
   if (import.meta.env.DEV || bootstrap.settings.developerMode) {
-    // eslint-disable-next-line no-console
     console.debug('[App] Update state:', {
       appUpdateStatus,
       requiredUpdateBlocked,
@@ -334,6 +333,7 @@ function App() {
       dismissedVersion: dismissedAppUpdateVersion,
       minimumSupportedVersion: appUpdate?.minimumSupportedVersion,
       hasSelectedAsset: Boolean(appUpdate?.selectedAssetUrl),
+      hasManualFallback: Boolean(appUpdate?.manualFallbackUrl),
     })
   }
 
@@ -389,8 +389,8 @@ function App() {
             void installAppUpdate()
           }}
           onOpenManualFallback={
-            appUpdate.selectedAssetUrl
-              ? () => void openExternal(appUpdate.selectedAssetUrl ?? '')
+            appUpdate.manualFallbackUrl || appUpdate.selectedAssetUrl
+              ? () => void openExternal(appUpdate.manualFallbackUrl ?? appUpdate.selectedAssetUrl ?? '')
               : undefined
           }
           onRetry={() => {

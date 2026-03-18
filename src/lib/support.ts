@@ -21,16 +21,27 @@ interface SupportSubmissionResponse {
   error?: {
     message?: string
     field?: string | null
+    fallbackEmail?: string | null
+    fallbackMailto?: string | null
   }
 }
 
 export class SupportSubmissionError extends Error {
   field?: string | null
+  fallbackEmail?: string | null
+  fallbackMailto?: string | null
 
-  constructor(message: string, field?: string | null) {
+  constructor(
+    message: string,
+    field?: string | null,
+    fallbackEmail?: string | null,
+    fallbackMailto?: string | null,
+  ) {
     super(message)
     this.name = 'SupportSubmissionError'
     this.field = field ?? null
+    this.fallbackEmail = fallbackEmail ?? null
+    this.fallbackMailto = fallbackMailto ?? null
   }
 }
 
@@ -68,16 +79,18 @@ async function readSupportResponse(response: Response) {
 
 function errorDetailsFromPayload(payload: SupportSubmissionResponse | string | null) {
   if (!payload) {
-    return { field: null, message: null }
+    return { field: null, message: null, fallbackEmail: null, fallbackMailto: null }
   }
 
   if (typeof payload === 'string') {
-    return { field: null, message: payload }
+    return { field: null, message: payload, fallbackEmail: null, fallbackMailto: null }
   }
 
   return {
     field: payload.error?.field ?? null,
     message: payload.error?.message ?? payload.message ?? null,
+    fallbackEmail: payload.error?.fallbackEmail ?? null,
+    fallbackMailto: payload.error?.fallbackMailto ?? null,
   }
 }
 
@@ -97,6 +110,25 @@ function supportRequestPayload(input: SupportSubmissionInput) {
 
 function parseDesktopSubmissionError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error ?? 'Could not submit your request.')
+  const trimmedMessage = message.trim()
+
+  if (trimmedMessage.startsWith('{')) {
+    try {
+      const parsed = JSON.parse(trimmedMessage) as SupportSubmissionResponse['error'] & { message?: string } | null
+
+      if (parsed?.message) {
+        return new SupportSubmissionError(
+          parsed.message,
+          parsed.field,
+          parsed.fallbackEmail,
+          parsed.fallbackMailto,
+        )
+      }
+    } catch {
+      // Ignore malformed JSON and fall back to plain-text parsing.
+    }
+  }
+
   const fieldMatch = /^FIELD:([^:]+):(.*)$/s.exec(message)
 
   if (fieldMatch) {
@@ -142,6 +174,8 @@ async function submitWithFetch(input: SupportSubmissionInput) {
     throw new SupportSubmissionError(
       payloadDetails.message ?? `Support request failed with status ${response.status}.`,
       payloadDetails.field,
+      payloadDetails.fallbackEmail,
+      payloadDetails.fallbackMailto,
     )
   }
 
@@ -149,6 +183,8 @@ async function submitWithFetch(input: SupportSubmissionInput) {
     throw new SupportSubmissionError(
       payloadDetails.message ?? 'Support request did not return a valid success response.',
       payloadDetails.field,
+      payloadDetails.fallbackEmail,
+      payloadDetails.fallbackMailto,
     )
   }
 

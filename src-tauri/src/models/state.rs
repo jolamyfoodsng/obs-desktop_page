@@ -262,6 +262,10 @@ pub struct AppUpdateSnapshot {
     pub selected_asset_reason: Option<String>,
     pub selected_asset_url: Option<String>,
     pub selected_asset_size: Option<u64>,
+    pub manual_fallback_name: Option<String>,
+    pub manual_fallback_reason: Option<String>,
+    pub manual_fallback_url: Option<String>,
+    pub manual_fallback_size: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -144,7 +144,7 @@ export function RequiredUpdateScreen({
                 Retry
               </Button>
 
-              {status === 'failed' && onOpenManualFallback && snapshot.selectedAssetUrl ? (
+              {status === 'failed' && onOpenManualFallback ? (
                 <Button className="w-full justify-center" variant="secondary" onClick={onOpenManualFallback}>
                   <ExternalLink className="size-4" />
                   Manual download

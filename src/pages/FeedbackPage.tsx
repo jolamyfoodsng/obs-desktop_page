@@ -1,4 +1,4 @@
-import { LoaderCircle, MessageSquare, Send, Siren, Sparkles } from 'lucide-react'
+import { LoaderCircle, Mail, MessageSquare, Send, Siren, Sparkles } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
@@ -120,6 +120,7 @@ function validateForm(input: {
 
 export function FeedbackPage() {
   const bootstrap = useAppStore((state) => state.bootstrap)
+  const openExternal = useAppStore((state) => state.openExternal)
   const [activeFlow, setActiveFlow] = useState<SupportRequestKind>('problem-report')
   const [email, setEmail] = useState('')
   const [subject, setSubject] = useState('')
@@ -129,6 +130,8 @@ export function FeedbackPage() {
   const [submitState, setSubmitState] = useState<'idle' | 'success' | 'error'>('idle')
   const [submitMessage, setSubmitMessage] = useState('')
   const [formErrors, setFormErrors] = useState<FormErrors>({})
+  const [fallbackEmail, setFallbackEmail] = useState<string | null>(null)
+  const [fallbackMailto, setFallbackMailto] = useState<string | null>(null)
 
   const activeDefinition = useMemo(
     () => flowDefinitions.find((flow) => flow.id === activeFlow) ?? flowDefinitions[0],
@@ -137,6 +140,10 @@ export function FeedbackPage() {
 
   const Icon = activeDefinition.icon
   const obsVersion = bootstrap?.obsDetection.obsVersion ?? null
+
+  function isDesktopRuntime() {
+    return typeof window !== 'undefined' && ('__TAURI_INTERNALS__' in window || '__TAURI__' in window)
+  }
 
   function clearFieldError(field: keyof FormErrors) {
     setFormErrors((current) => {
@@ -148,6 +155,19 @@ export function FeedbackPage() {
       delete next[field]
       return next
     })
+  }
+
+  function openFallbackMailto() {
+    if (!fallbackMailto) {
+      return
+    }
+
+    if (isDesktopRuntime()) {
+      void openExternal(fallbackMailto)
+      return
+    }
+
+    window.location.assign(fallbackMailto)
   }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -164,6 +184,8 @@ export function FeedbackPage() {
       setFormErrors(nextErrors)
       setSubmitState('error')
       setSubmitMessage(Object.values(nextErrors)[0] ?? 'Please review the highlighted fields.')
+      setFallbackEmail(null)
+      setFallbackMailto(null)
       return
     }
 
@@ -171,6 +193,8 @@ export function FeedbackPage() {
     setSubmitState('idle')
     setSubmitMessage('')
     setFormErrors({})
+    setFallbackEmail(null)
+    setFallbackMailto(null)
 
     try {
       await submitSupportRequest({
@@ -193,6 +217,8 @@ export function FeedbackPage() {
       setSubject('')
       setMessage('')
       setPluginUrl('')
+      setFallbackEmail(null)
+      setFallbackMailto(null)
       toast.success('Submission sent successfully.')
     } catch (error) {
       const nextMessage = error instanceof Error ? error.message : 'Could not submit your request.'
@@ -206,6 +232,8 @@ export function FeedbackPage() {
           [field]: nextMessage,
         }))
       }
+      setFallbackEmail(error instanceof SupportSubmissionError ? error.fallbackEmail ?? null : null)
+      setFallbackMailto(error instanceof SupportSubmissionError ? error.fallbackMailto ?? null : null)
       setSubmitState('error')
       setSubmitMessage(nextMessage)
       toast.error(nextMessage)
@@ -238,6 +266,8 @@ export function FeedbackPage() {
                 setSubmitState('idle')
                 setSubmitMessage('')
                 setFormErrors({})
+                setFallbackEmail(null)
+                setFallbackMailto(null)
               }}
               className={[
                 'rounded-[24px] border p-5 text-left transition',
@@ -367,7 +397,22 @@ export function FeedbackPage() {
                     : 'border-rose-400/30 bg-rose-500/10 text-rose-100',
                 ].join(' ')}
               >
-                {submitMessage}
+                <div className="space-y-3">
+                  <p>{submitMessage}</p>
+                  {submitState === 'error' && fallbackMailto ? (
+                    <div className="flex flex-col gap-3 border-t border-white/10 pt-3">
+                      <p className="text-sm text-rose-50/90">
+                        Open your mail app with a prefilled draft to {fallbackEmail ?? 'the support inbox'}.
+                      </p>
+                      <div>
+                        <Button onClick={openFallbackMailto} size="sm" type="button" variant="outline">
+                          <Mail className="size-4" />
+                          Open mail app
+                        </Button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
               </div>
             ) : null}
           </form>

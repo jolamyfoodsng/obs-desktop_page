@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 
 import {
+  buildSupportFallbackMailto,
   deliverSupportSubmission,
   enforceSupportRateLimit,
   sendSupportError,
@@ -44,11 +45,17 @@ export default async function handler(request: VercelRequest, response: VercelRe
     console.error('[support-api] submission delivery failed', error)
 
     const detailedMessage = error instanceof Error ? error.message : null
-    const message =
-      process.env.NODE_ENV === 'production' || !detailedMessage
+    const supportInbox = process.env.SUPPORT_INBOX_EMAIL?.trim() || null
+    const fallbackMailto = supportInbox ? buildSupportFallbackMailto(validated.value, supportInbox) : null
+    const message = supportInbox
+      ? `We could not submit your request right now. Please email ${supportInbox} directly instead.`
+      : process.env.NODE_ENV === 'production' || !detailedMessage
         ? 'We could not submit your request right now. Please try again later.'
         : `Support delivery failed: ${detailedMessage}`
 
-    return sendSupportError(response, 500, message)
+    return sendSupportError(response, supportInbox ? 503 : 500, message, undefined, {
+      fallbackEmail: supportInbox,
+      fallbackMailto,
+    })
   }
 }

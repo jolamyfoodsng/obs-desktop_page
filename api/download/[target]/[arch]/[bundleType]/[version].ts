@@ -23,6 +23,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
   const bundleType = readPathParam(request.query.bundleType)
   const version = readPathParam(request.query.version)
   const channel = readPathParam(request.query.channel)
+  const requestedAssetName = readPathParam(request.query.assetName)
 
   if (!target || !arch || !bundleType || !version) {
     return sendError(response, 400, 'Missing download route parameters.')
@@ -42,15 +43,22 @@ export default async function handler(request: VercelRequest, response: VercelRe
       releaseVersion: version,
     })
 
-    const platformKey = `${target}-${arch}-${bundleType}`
+    const platformKey = payload.selectedPlatform ?? `${target}-${arch}-${bundleType}`
     const platform = payload.platforms[platformKey]
-    if (!platform) {
+    const isManualFallbackRequest = Boolean(requestedAssetName)
+
+    if (!isManualFallbackRequest && !platform) {
       await safeShutdown(posthog)
       return sendError(
         response,
         404,
         payload.message ?? 'No installable asset was found for the requested platform.',
       )
+    }
+
+    if (isManualFallbackRequest && requestedAssetName !== payload.manualFallbackName) {
+      await safeShutdown(posthog)
+      return sendError(response, 404, 'Requested manual fallback asset is not available for this platform.')
     }
 
     const requestedVersion = version.startsWith('v') ? version.slice(1) : version
@@ -93,7 +101,13 @@ export default async function handler(request: VercelRequest, response: VercelRe
     const release = (await githubReleaseResponse.json()) as {
       assets: Array<{ name: string; url: string }>
     }
-    const matchingAsset = release.assets.find((asset) => asset.name === platform.fileName)
+    const assetNameToDownload = requestedAssetName ?? platform?.fileName
+    if (!assetNameToDownload) {
+      await safeShutdown(posthog)
+      return sendError(response, 404, 'Requested asset is no longer present in the GitHub release.')
+    }
+
+    const matchingAsset = release.assets.find((asset) => asset.name === assetNameToDownload)
 
     if (!matchingAsset) {
       await safeShutdown(posthog)
@@ -129,14 +143,15 @@ export default async function handler(request: VercelRequest, response: VercelRe
         bundleType,
         version: payload.latestVersion,
         channel: payload.channel,
-        fileName: platform.fileName,
-        fileSize: platform.size,
+        fileName: assetNameToDownload,
+        fileSize: isManualFallbackRequest ? (payload.manualFallbackSize ?? null) : (platform?.size ?? null),
+        manualFallback: isManualFallbackRequest,
       },
     })
     await safeShutdown(posthog)
 
     response.setHeader('Cache-Control', 'private, no-store')
-    response.setHeader('Content-Disposition', `attachment; filename="${platform.fileName}"`)
+    response.setHeader('Content-Disposition', `attachment; filename="${assetNameToDownload}"`)
     response.setHeader(
       'Content-Type',
       assetResponse.headers.get('content-type') ?? 'application/octet-stream',

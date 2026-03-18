@@ -30,16 +30,30 @@ export interface NormalizedSupportSubmission {
   installId: string | null
 }
 
+interface SupportErrorOptions {
+  field?: string | null
+  fallbackEmail?: string | null
+  fallbackMailto?: string | null
+}
+
 function json(response: VercelResponse, status: number, payload: Record<string, unknown>) {
   return response.status(status).json(payload)
 }
 
-export function sendSupportError(response: VercelResponse, status: number, message: string, field?: string) {
+export function sendSupportError(
+  response: VercelResponse,
+  status: number,
+  message: string,
+  field?: string,
+  options: SupportErrorOptions = {},
+) {
   return json(response, status, {
     ok: false,
     error: {
       message,
-      field: field ?? null,
+      field: field ?? options.field ?? null,
+      fallbackEmail: options.fallbackEmail ?? null,
+      fallbackMailto: options.fallbackMailto ?? null,
     },
   })
 }
@@ -218,6 +232,33 @@ function detailRow(label: string, value: string | null) {
   return `<tr><td style="padding:6px 12px 6px 0;font-weight:600;vertical-align:top;white-space:nowrap;">${escapeHtml(label)}</td><td style="padding:6px 0;">${value ? escapeHtml(value) : '—'}</td></tr>`
 }
 
+function supportSubmissionText(submission: NormalizedSupportSubmission) {
+  return [
+    labelForKind(submission.kind),
+    '',
+    `Reply email: ${submission.email ?? '—'}`,
+    `Plugin URL: ${submission.pluginUrl ?? '—'}`,
+    `OBS version: ${submission.obsVersion ?? '—'}`,
+    `App version: ${submission.appVersion ?? '—'}`,
+    `Platform: ${submission.platform ?? '—'}`,
+    `Install ID: ${submission.installId ?? '—'}`,
+    '',
+    'Message:',
+    submission.message,
+  ].join('\n')
+}
+
+export function buildSupportFallbackMailto(submission: NormalizedSupportSubmission, supportInbox: string) {
+  const subjectPrefix = `[OBS Plugin Installer] ${labelForKind(submission.kind)}`
+  const subject = submission.subject ? `${subjectPrefix}: ${submission.subject}` : subjectPrefix
+  const query = new URLSearchParams({
+    subject,
+    body: supportSubmissionText(submission),
+  })
+
+  return `mailto:${supportInbox}?${query.toString()}`
+}
+
 export async function deliverSupportSubmission(submission: NormalizedSupportSubmission) {
   const resendApiKey = process.env.RESEND_API_KEY?.trim()
   const supportInbox = process.env.SUPPORT_INBOX_EMAIL?.trim()
@@ -244,20 +285,7 @@ export async function deliverSupportSubmission(submission: NormalizedSupportSubm
       <pre style="white-space:pre-wrap;background:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;padding:16px;">${escapeHtml(submission.message)}</pre>
     </div>
   `
-
-  const text = [
-    labelForKind(submission.kind),
-    '',
-    `Reply email: ${submission.email ?? '—'}`,
-    `Plugin URL: ${submission.pluginUrl ?? '—'}`,
-    `OBS version: ${submission.obsVersion ?? '—'}`,
-    `App version: ${submission.appVersion ?? '—'}`,
-    `Platform: ${submission.platform ?? '—'}`,
-    `Install ID: ${submission.installId ?? '—'}`,
-    '',
-    'Message:',
-    submission.message,
-  ].join('\n')
+  const text = supportSubmissionText(submission)
 
   const resendResponse = await fetch('https://api.resend.com/emails', {
     method: 'POST',

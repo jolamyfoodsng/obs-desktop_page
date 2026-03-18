@@ -47,6 +47,8 @@ pub struct SupportSubmissionRequest {
 struct SupportSubmissionErrorPayload {
     message: Option<String>,
     field: Option<String>,
+    fallback_email: Option<String>,
+    fallback_mailto: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -61,6 +63,15 @@ struct SupportSubmissionResponse {
 pub struct SupportSubmissionSuccess {
     pub ok: bool,
     pub message: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopSupportSubmissionError {
+    message: String,
+    field: Option<String>,
+    fallback_email: Option<String>,
+    fallback_mailto: Option<String>,
 }
 
 fn support_api_url() -> String {
@@ -81,6 +92,21 @@ fn trim_optional(value: Option<String>) -> Option<String> {
             Some(trimmed.to_string())
         }
     })
+}
+
+fn serialize_submission_error(
+    message: String,
+    field: Option<String>,
+    fallback_email: Option<String>,
+    fallback_mailto: Option<String>,
+) -> String {
+    serde_json::to_string(&DesktopSupportSubmissionError {
+        message: message.clone(),
+        field,
+        fallback_email,
+        fallback_mailto,
+    })
+    .unwrap_or(message)
 }
 
 #[tauri::command]
@@ -138,8 +164,13 @@ pub async fn submit_support_request(
         .send()
         .await
         .map_err(|error| {
-            format!(
-                "Support submission could not reach {support_api_url}. {error}. This is usually a network or support server configuration issue."
+            serialize_submission_error(
+                format!(
+                    "Support submission could not reach {support_api_url}. {error}. This is usually a network or support server configuration issue."
+                ),
+                None,
+                None,
+                None,
             )
         })?;
 
@@ -157,12 +188,21 @@ pub async fn submit_support_request(
             .as_ref()
             .and_then(|body| body.error.as_ref())
             .and_then(|error| error.field.clone());
+        let fallback_email = payload
+            .as_ref()
+            .and_then(|body| body.error.as_ref())
+            .and_then(|error| error.fallback_email.clone());
+        let fallback_mailto = payload
+            .as_ref()
+            .and_then(|body| body.error.as_ref())
+            .and_then(|error| error.fallback_mailto.clone());
 
-        if let Some(field) = field.filter(|value| !value.trim().is_empty()) {
-            return Err(format!("FIELD:{field}:{message}"));
-        }
-
-        return Err(message);
+        return Err(serialize_submission_error(
+            message,
+            field.filter(|value| !value.trim().is_empty()),
+            fallback_email,
+            fallback_mailto,
+        ));
     }
 
     match payload {
@@ -170,13 +210,36 @@ pub async fn submit_support_request(
             ok: true,
             message: body.message,
         }),
-        Some(body) => Err(body
-            .error
-            .and_then(|error| error.message)
-            .or(body.message)
-            .unwrap_or_else(|| {
-                "Support request did not return a valid success response.".to_string()
-            })),
+        Some(body) => {
+            let message = body
+                .error
+                .as_ref()
+                .and_then(|error| error.message.clone())
+                .or(body.message)
+                .unwrap_or_else(|| {
+                    "Support request did not return a valid success response.".to_string()
+                });
+            let field = body
+                .error
+                .as_ref()
+                .and_then(|error| error.field.clone())
+                .filter(|value| !value.trim().is_empty());
+            let fallback_email = body
+                .error
+                .as_ref()
+                .and_then(|error| error.fallback_email.clone());
+            let fallback_mailto = body
+                .error
+                .as_ref()
+                .and_then(|error| error.fallback_mailto.clone());
+
+            Err(serialize_submission_error(
+                message,
+                field,
+                fallback_email,
+                fallback_mailto,
+            ))
+        }
         None => Ok(SupportSubmissionSuccess {
             ok: true,
             message: None,
