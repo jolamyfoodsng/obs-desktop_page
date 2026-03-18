@@ -112,6 +112,9 @@ jobs:
           TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
           TAURI_UPDATE_BUNDLE_TYPE: ${{ matrix.default_update_bundle }}
 
+      - name: Verify generated updater assets
+        run: node scripts/verify_release_assets.mjs --root src-tauri/target/release/bundle --bundles ${{ matrix.bundles }}
+
       - name: Upload workflow artifacts
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         uses: actions/upload-artifact@v4
@@ -194,6 +197,9 @@ jobs:
 
           printf 'Publishing %s release asset(s):\n' "${#release_files[@]}"
           printf ' - %s\n' "${release_files[@]}"
+
+      - name: Verify merged release artifacts
+        run: node scripts/verify_release_assets.mjs --root release-artifacts --bundles nsis,msi,appimage,deb,app,dmg
 
       - name: Publish prerelease
         uses: softprops/action-gh-release@v2

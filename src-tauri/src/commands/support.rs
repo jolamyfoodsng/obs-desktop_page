@@ -181,3 +181,64 @@ pub async fn submit_support_request(
         }),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_support_api_url;
+
+    #[test]
+    fn prefers_runtime_support_api_base_url() {
+        assert_eq!(
+            resolve_support_api_url(
+                Some(" https://runtime-support.example.com/ "),
+                Some("https://build-support.example.com"),
+                Some("https://runtime-update.example.com"),
+                Some("https://build-update.example.com"),
+            ),
+            "https://runtime-support.example.com/api/support"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_build_support_api_base_url() {
+        assert_eq!(
+            resolve_support_api_url(
+                Some("   "),
+                Some("https://build-support.example.com/"),
+                Some("https://runtime-update.example.com"),
+                Some("https://build-update.example.com"),
+            ),
+            "https://build-support.example.com/api/support"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_update_base_urls_before_default() {
+        assert_eq!(
+            resolve_support_api_url(
+                None,
+                None,
+                Some("https://runtime-update.example.com/"),
+                None
+            ),
+            "https://runtime-update.example.com/api/support"
+        );
+        assert_eq!(
+            resolve_support_api_url(
+                None,
+                None,
+                Some("   "),
+                Some("https://build-update.example.com")
+            ),
+            "https://build-update.example.com/api/support"
+        );
+    }
+
+    #[test]
+    fn falls_back_to_default_support_url() {
+        assert_eq!(
+            resolve_support_api_url(None, None, None, None),
+            "https://obs-desktop-page.vercel.app/api/support"
+        );
+    }
+}

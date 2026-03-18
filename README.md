@@ -262,6 +262,7 @@ For every push and version-tag push, GitHub Actions:
 - verifies that the GitHub release tag matches the app version
 - builds Tauri release bundles
 - generates updater signatures because `bundle.createUpdaterArtifacts` is enabled
+- verifies each matrix build produced the expected installer/update artifact and signature pairs before upload
 - uploads installer artifacts and `.sig` files to the workflow run on normal branch pushes
 - creates a new release entry after successful `main` builds using the current app version and GitHub Actions run number
 - uploads both installer artifacts and `.sig` files to a GitHub Release automatically when the pushed ref is a version tag like `v0.2.0`
@@ -353,9 +354,8 @@ Optional GitHub Actions variable:
 The update server expects the GitHub Release to contain signed installer assets such as:
 
 - Windows:
-  - `*.exe`
-  - `*.msi`
-  - matching `*.sig`
+  - NSIS `*.exe` plus matching `*.exe.sig`
+  - MSI `*.msi` plus matching `*.msi.sig`
 - Linux:
   - `*.AppImage`
   - `*.deb`
