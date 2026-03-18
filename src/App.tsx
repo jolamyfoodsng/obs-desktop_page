@@ -316,8 +316,6 @@ function App() {
   const showUpdateDialog = Boolean(
     appUpdate &&
     (requiredUpdateBlocked ||
-      appUpdateStatus === 'update-available' ||
-      appUpdateStatus === 'update-required' ||
       appUpdateStatus === 'downloading' ||
       appUpdateStatus === 'ready-to-restart' ||
       (appUpdateStatus === 'failed' &&
