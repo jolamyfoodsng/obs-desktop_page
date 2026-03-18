@@ -13,7 +13,6 @@ const POSTHOG_API_HOST =
   import.meta.env.VITE_POSTHOG_API_HOST ?? 'https://us.i.posthog.com'
 
 const APP_VERSION = packageJson.version
-const ANALYTICS_ENVIRONMENT = 'desktop'
 const PERSON_PROFILE_MODE = 'always' as const
 
 type TrackableEventName =
@@ -33,6 +32,22 @@ let bridgedIdentityDistinctId: string | null = null
 let posthogJsReady = false
 let posthogJsInitAttempted = false
 
+function isDesktopRuntime() {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+}
+
+function analyticsEnvironment() {
+  return isDesktopRuntime() ? 'desktop' : 'web'
+}
+
+function shouldUseDesktopBridge() {
+  return isDesktopRuntime()
+}
+
+function shouldUsePosthogJs() {
+  return typeof window !== 'undefined' && !isDesktopRuntime()
+}
+
 function isAnalyticsConfigured() {
   return (
     typeof window !== 'undefined' &&
@@ -43,7 +58,7 @@ function isAnalyticsConfigured() {
 
 if (typeof window !== 'undefined' && !isAnalyticsConfigured()) {
   console.warn(
-    '[analytics] PostHog is disabled. Set VITE_POSTHOG_PROJECT_KEY in .env.local and restart the app.',
+    '[analytics] PostHog is disabled. Set VITE_POSTHOG_PROJECT_KEY for local builds or configure it in the release workflow variables.',
   )
 }
 
@@ -102,18 +117,18 @@ function buildEventPayload(
       distinct_id: distinctId,
       app_version: APP_VERSION,
       platform: inferRuntimePlatform(),
-      environment: ANALYTICS_ENVIRONMENT,
+      environment: analyticsEnvironment(),
       install_id: getOrCreateInstallId(),
     },
     timestamp: new Date().toISOString(),
   }
 }
 
-async function captureWithFetch(
+async function captureWithDesktopBridge(
   eventName: TrackableEventName,
   properties: Record<string, unknown>,
 ) {
-  if (typeof window === 'undefined') {
+  if (!shouldUseDesktopBridge()) {
     return
   }
 
@@ -121,7 +136,7 @@ async function captureWithFetch(
   await desktopApi.captureAnalyticsEvent({
     apiKey: payload.api_key,
     apiHost: POSTHOG_API_HOST,
-    eventName: eventName,
+    eventName,
     distinctId: payload.distinct_id,
     timestamp: payload.timestamp,
     personProfiles: payload.person_profiles,
@@ -133,7 +148,7 @@ function captureWithJs(
   eventName: TrackableEventName,
   properties: Record<string, unknown>,
 ) {
-  if (!posthogJsReady) {
+  if (!shouldUsePosthogJs() || !posthogJsReady) {
     return
   }
 
@@ -142,7 +157,7 @@ function captureWithJs(
       ...properties,
       app_version: APP_VERSION,
       platform: inferRuntimePlatform(),
-      environment: ANALYTICS_ENVIRONMENT,
+      environment: analyticsEnvironment(),
       install_id: getOrCreateInstallId(),
     })
   } catch (error) {
@@ -151,6 +166,10 @@ function captureWithJs(
 }
 
 async function identifyWithDesktopBridge(userAccountId?: string | null) {
+  if (!shouldUseDesktopBridge()) {
+    return
+  }
+
   const distinctId = resolveAnalyticsDistinctId(userAccountId)
   const identityType = userAccountId?.trim() ? 'account' : 'install'
 
@@ -171,7 +190,7 @@ async function identifyWithDesktopBridge(userAccountId?: string | null) {
       $set: {
         app_version: APP_VERSION,
         platform: inferRuntimePlatform(),
-        environment: ANALYTICS_ENVIRONMENT,
+        environment: analyticsEnvironment(),
         install_id: getOrCreateInstallId(),
         analytics_identity_type: identityType,
       },
@@ -187,7 +206,7 @@ function applyAnalyticsIdentity(userAccountId?: string | null) {
 
   activeDistinctId = distinctId
 
-  if (!posthogJsReady) {
+  if (!shouldUsePosthogJs() || !posthogJsReady) {
     return
   }
 
@@ -196,7 +215,7 @@ function applyAnalyticsIdentity(userAccountId?: string | null) {
     posthog.register({
       app_version: APP_VERSION,
       platform: inferRuntimePlatform(),
-      environment: ANALYTICS_ENVIRONMENT,
+      environment: analyticsEnvironment(),
       analytics_identity_type: identityType,
       install_id: getOrCreateInstallId(),
     })
@@ -207,7 +226,7 @@ function applyAnalyticsIdentity(userAccountId?: string | null) {
 }
 
 function initializePosthogJs() {
-  if (posthogJsReady || posthogJsInitAttempted) {
+  if (!shouldUsePosthogJs() || posthogJsReady || posthogJsInitAttempted) {
     return
   }
 
@@ -296,13 +315,17 @@ export function trackEvent(
 ) {
   scheduleAnalyticsTask(async () => {
     await initializeAnalytics()
-    captureWithJs(eventName, properties)
 
-    try {
-      await captureWithFetch(eventName, properties)
-    } catch (error) {
-      console.warn('[analytics] capture failed', error)
+    if (shouldUseDesktopBridge()) {
+      try {
+        await captureWithDesktopBridge(eventName, properties)
+      } catch (error) {
+        console.warn('[analytics] desktop bridge capture failed', error)
+      }
+      return
     }
+
+    captureWithJs(eventName, properties)
   })
 }
 

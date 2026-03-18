@@ -45,12 +45,18 @@ jobs:
             artifact_suffix: linux-arm64
             bundles: deb
             default_update_bundle: deb
-          # - os: macos-latest
-          #   label: macOS
-          #   platform: macos
-          #   artifact_suffix: macos
-          #   bundles: app,dmg
-          #   default_update_bundle: app
+          - os: macos-15-intel
+            label: macOS Intel
+            platform: macos
+            artifact_suffix: macos-x64
+            bundles: app,dmg
+            default_update_bundle: app
+          - os: macos-15
+            label: macOS Apple Silicon
+            platform: macos
+            artifact_suffix: macos-arm64
+            bundles: app,dmg
+            default_update_bundle: app
 
     steps:
       - name: Check out source
@@ -117,6 +123,8 @@ jobs:
             src-tauri/target/release/bundle/**/*.msi
             src-tauri/target/release/bundle/**/*.AppImage
             src-tauri/target/release/bundle/**/*.deb
+            src-tauri/target/release/bundle/**/*.app.tar.gz
+            src-tauri/target/release/bundle/**/*.dmg
             src-tauri/target/release/bundle/**/*.sig
 
       - name: Upload release artifacts
@@ -132,6 +140,8 @@ jobs:
             src-tauri/target/release/bundle/**/*.msi
             src-tauri/target/release/bundle/**/*.AppImage
             src-tauri/target/release/bundle/**/*.deb
+            src-tauri/target/release/bundle/**/*.app.tar.gz
+            src-tauri/target/release/bundle/**/*.dmg
             src-tauri/target/release/bundle/**/*.sig
 
   publish-main-release:
@@ -172,6 +182,8 @@ jobs:
             -name '*.msi' -o \
             -name '*.AppImage' -o \
             -name '*.deb' -o \
+            -name '*.app.tar.gz' -o \
+            -name '*.dmg' -o \
             -name '*.sig' \
           \))
 
@@ -205,4 +217,6 @@ jobs:
             release-artifacts/**/*.msi
             release-artifacts/**/*.AppImage
             release-artifacts/**/*.deb
+            release-artifacts/**/*.app.tar.gz
+            release-artifacts/**/*.dmg
             release-artifacts/**/*.sig
