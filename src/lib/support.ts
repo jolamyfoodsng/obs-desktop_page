@@ -155,10 +155,16 @@ async function submitWithFetch(input: SupportSubmissionInput) {
   return payload
 }
 
-export async function submitSupportRequest(input: SupportSubmissionInput) {
-  const isDesktopRuntime = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+function isDesktopRuntime() {
+  if (typeof window === 'undefined') {
+    return false
+  }
 
-  if (isDesktopRuntime) {
+  return '__TAURI_INTERNALS__' in window || '__TAURI__' in window
+}
+
+export async function submitSupportRequest(input: SupportSubmissionInput) {
+  if (isDesktopRuntime()) {
     return submitWithDesktopBridge(input)
   }
 
