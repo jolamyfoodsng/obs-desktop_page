@@ -5,17 +5,27 @@ use std::time::Duration;
 
 const DEFAULT_SUPPORT_API_BASE_URL: &str = "https://obs-desktop-page.vercel.app";
 
-fn runtime_or_build_var(name: &str, build_value: Option<&str>) -> Option<String> {
-    std::env::var(name)
-        .ok()
-        .map(|value| value.trim().to_string())
+fn normalize_env_value(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
         .filter(|value| !value.is_empty())
-        .or_else(|| {
-            build_value
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToOwned::to_owned)
-        })
+        .map(ToOwned::to_owned)
+}
+
+fn resolve_support_api_url(
+    runtime_support_api_base_url: Option<&str>,
+    build_support_api_base_url: Option<&str>,
+    runtime_update_base_url: Option<&str>,
+    build_update_base_url: Option<&str>,
+) -> String {
+    let configured = normalize_env_value(runtime_support_api_base_url)
+        .or_else(|| normalize_env_value(build_support_api_base_url))
+        .or_else(|| normalize_env_value(runtime_update_base_url))
+        .or_else(|| normalize_env_value(build_update_base_url))
+        .unwrap_or_else(|| DEFAULT_SUPPORT_API_BASE_URL.to_string());
+    let configured = configured.trim_end_matches('/');
+
+    format!("{configured}/api/support")
 }
 
 #[derive(Debug, Deserialize)]
@@ -54,20 +64,12 @@ pub struct SupportSubmissionSuccess {
 }
 
 fn support_api_url() -> String {
-    let configured = runtime_or_build_var(
-        "SUPPORT_API_BASE_URL",
+    resolve_support_api_url(
+        std::env::var("SUPPORT_API_BASE_URL").ok().as_deref(),
         option_env!("VITE_SUPPORT_API_BASE_URL"),
+        std::env::var("TAURI_UPDATE_BASE_URL").ok().as_deref(),
+        option_env!("TAURI_UPDATE_BASE_URL"),
     )
-    .or_else(|| {
-        runtime_or_build_var(
-            "TAURI_UPDATE_BASE_URL",
-            option_env!("TAURI_UPDATE_BASE_URL"),
-        )
-    })
-    .unwrap_or_else(|| DEFAULT_SUPPORT_API_BASE_URL.to_string());
-    let configured = configured.trim_end_matches('/');
-
-    format!("{configured}/api/support")
 }
 
 fn trim_optional(value: Option<String>) -> Option<String> {
