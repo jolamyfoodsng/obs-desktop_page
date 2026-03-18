@@ -3,7 +3,7 @@ import {
   ArrowRight,
   Boxes,
   Download,
-  FolderSearch2,
+  LifeBuoy,
   PackageCheck,
   ShieldCheck,
   Stethoscope,
@@ -17,6 +17,7 @@ import { PluginGlyph } from '../lib/pluginVisuals'
 import {
   formatDisplayDate,
   getInstallMethod,
+  getPluginCompatibility,
   getRecommendedPackage,
   hasGitHubReleaseSource,
   isUpdateAvailable,
@@ -38,11 +39,23 @@ function formatHistoryAction(action: string) {
   }
 }
 
+function formatPlatformLabel(platform: string) {
+  switch (platform) {
+    case 'macos':
+      return 'macOS'
+    case 'linux':
+      return 'Linux'
+    case 'windows':
+      return 'Windows'
+    default:
+      return platform
+  }
+}
+
 export function DashboardPage() {
   const navigate = useNavigate()
   const bootstrap = useAppStore((state) => state.bootstrap)
   const checkForAppUpdate = useAppStore((state) => state.checkForAppUpdate)
-  const detectObs = useAppStore((state) => state.detectObs)
   const installPlugin = useAppStore((state) => state.installPlugin)
 
   if (!bootstrap) {
@@ -50,10 +63,9 @@ export function DashboardPage() {
   }
 
   const currentPlatform = bootstrap.currentPlatform
+  const currentPlatformLabel = formatPlatformLabel(currentPlatform)
   const pluginsById = new Map(bootstrap.plugins.map((plugin) => [plugin.id, plugin]))
-  const installedPluginIds = new Set(
-    bootstrap.installedPlugins.map((installedPlugin) => installedPlugin.pluginId),
-  )
+
   const installedRows = bootstrap.installedPlugins
     .map((installedPlugin) => ({
       installedPlugin,
@@ -69,38 +81,37 @@ export function DashboardPage() {
     )
 
   const managedInstalledCount = installedRows.filter(
-    ({ installedPlugin }) => getInstallMethod(installedPlugin) !== 'external',
+    ({ installedPlugin }) => getInstallMethod(installedPlugin) === 'managed',
   ).length
 
   const updates = installedRows
     .filter(({ installedPlugin, plugin }) => {
-      if (!plugin) {
+      if (getInstallMethod(installedPlugin) !== 'managed' || installedPlugin.installKind !== 'full') {
         return false
       }
 
-      return (
-        getInstallMethod(installedPlugin) !== 'external' &&
-        isUpdateAvailable(installedPlugin.installedVersion, plugin.version)
-      )
+      if (!getPluginCompatibility(plugin, currentPlatform).canInstall) {
+        return false
+      }
+
+      return isUpdateAvailable(installedPlugin.installedVersion, plugin.version)
     })
     .sort((left, right) => left.plugin.name.localeCompare(right.plugin.name))
 
   const recentActivity = bootstrap.installHistory
     .slice()
     .sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp))
-    .filter(
-      (entry) => entry.action !== 'uninstall' && installedPluginIds.has(entry.pluginId),
-    )
     .slice(0, 5)
 
-  const recentInstallsThisMonth = bootstrap.installHistory.filter((entry) => {
-    const installedAt = new Date(entry.timestamp)
+  const recentManagedInstallsThisMonth = bootstrap.installHistory.filter((entry) => {
+    const activityDate = new Date(entry.timestamp)
     const now = new Date()
 
     return (
-      installedAt.getFullYear() === now.getFullYear() &&
-      installedAt.getMonth() === now.getMonth() &&
-      entry.action !== 'uninstall'
+      activityDate.getFullYear() === now.getFullYear() &&
+      activityDate.getMonth() === now.getMonth() &&
+      entry.managed &&
+      (entry.action === 'install' || entry.action === 'adopt')
     )
   }).length
 
@@ -129,7 +140,7 @@ export function DashboardPage() {
           </p>
         </div>
         <div className="rounded-full border border-white/10 bg-white/[0.04] px-4 py-3 text-sm text-slate-300">
-          v{bootstrap.currentVersion} • {currentPlatform === 'macos' ? 'macOS' : currentPlatform}
+          v{bootstrap.currentVersion} • {currentPlatformLabel}
         </div>
       </section>
 
@@ -141,7 +152,7 @@ export function DashboardPage() {
           <div className="mt-3 flex items-end justify-between gap-3">
             <span className="text-3xl font-black text-white">{managedInstalledCount}</span>
             <span className="rounded-full bg-primary/10 px-2 py-1 text-xs font-semibold text-primary">
-              +{recentInstallsThisMonth} this month
+              +{recentManagedInstallsThisMonth} new this month
             </span>
           </div>
         </div>
@@ -177,7 +188,7 @@ export function DashboardPage() {
             <div className="flex items-center justify-between border-b border-white/10 px-6 py-4">
               <h2 className="text-lg font-semibold text-white">Recent Activity</h2>
               <Button size="sm" variant="ghost" onClick={() => navigate('/installed')}>
-                View all
+                View installed list
               </Button>
             </div>
             <div className="divide-y divide-white/10">
@@ -188,14 +199,9 @@ export function DashboardPage() {
               ) : (
                 recentActivity.map((entry) => {
                   const plugin = pluginsById.get(entry.pluginId)
-
-                  return (
-                    <button
-                      className="flex w-full items-center gap-4 px-6 py-4 text-left transition-colors hover:bg-white/[0.03]"
-                      key={`${entry.pluginId}-${entry.timestamp}`}
-                      onClick={() => navigate(`/plugin/${entry.pluginId}`)}
-                      type="button"
-                    >
+                  const canOpenPlugin = Boolean(plugin)
+                  const content = (
+                    <>
                       <div className="flex size-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03] text-primary">
                         {plugin?.iconUrl ? (
                           <img
@@ -217,6 +223,28 @@ export function DashboardPage() {
                       <span className="text-[11px] font-mono text-slate-600">
                         {formatDisplayDate(entry.timestamp)}
                       </span>
+                    </>
+                  )
+
+                  if (!canOpenPlugin) {
+                    return (
+                      <div
+                        className="flex w-full items-center gap-4 px-6 py-4"
+                        key={`${entry.pluginId}-${entry.timestamp}`}
+                      >
+                        {content}
+                      </div>
+                    )
+                  }
+
+                  return (
+                    <button
+                      className="flex w-full items-center gap-4 px-6 py-4 text-left transition-colors hover:bg-white/[0.03]"
+                      key={`${entry.pluginId}-${entry.timestamp}`}
+                      onClick={() => navigate(`/plugin/${entry.pluginId}`)}
+                      type="button"
+                    >
+                      {content}
                     </button>
                   )
                 })
@@ -225,11 +253,14 @@ export function DashboardPage() {
           </section>
 
           <section className="overflow-hidden rounded-[24px] border border-white/10 bg-white/[0.04]">
-            <div className="border-b border-white/10 bg-primary/5 px-6 py-4">
+            <div className="flex items-center justify-between border-b border-white/10 bg-primary/5 px-6 py-4">
               <h2 className="flex items-center gap-2 text-lg font-semibold text-white">
                 <Download className="size-4 text-primary" />
                 Updates Available
               </h2>
+              <Button size="sm" variant="ghost" onClick={() => navigate('/updates')}>
+                Open updates
+              </Button>
             </div>
             <div className="space-y-4 p-6">
               {updates.length === 0 ? (
@@ -238,10 +269,6 @@ export function DashboardPage() {
                 </div>
               ) : (
                 updates.slice(0, 3).map(({ installedPlugin, plugin }) => {
-                  if (!plugin) {
-                    return null
-                  }
-
                   const recommendedPackage = getRecommendedPackage(plugin, currentPlatform)
 
                   return (
@@ -295,10 +322,10 @@ export function DashboardPage() {
                 <Stethoscope className="size-4" />
                 Open diagnostics
               </Button>
-              {/* <Button variant="outline" onClick={() => void detectObs()}>
-                <FolderSearch2 className="size-4" />
-                Scan OBS
-              </Button> */}
+              <Button variant="secondary" onClick={() => navigate('/feedback')}>
+                <LifeBuoy className="size-4" />
+                Open support
+              </Button>
             </div>
           </section>
 
@@ -343,9 +370,7 @@ export function DashboardPage() {
               </div>
               <div className="flex items-center justify-between py-2">
                 <span className="text-xs text-slate-400">Platform</span>
-                <span className="text-xs font-semibold text-slate-200">
-                  {currentPlatform === 'macos' ? 'macOS' : currentPlatform}
-                </span>
+                <span className="text-xs font-semibold text-slate-200">{currentPlatformLabel}</span>
               </div>
             </div>
           </section>

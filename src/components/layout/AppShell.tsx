@@ -5,6 +5,7 @@ import {
   Download,
   FolderSearch2,
   Home,
+  MessageSquareMore,
   RefreshCw,
   Search,
   Settings,
@@ -22,15 +23,68 @@ import { Button } from '../ui/Button'
 import { CopyPathField } from '../ui/CopyPathField'
 import { ShortcutHint } from '../ui/ShortcutHint'
 
+const RECENT_SEARCHES_STORAGE_KEY = 'obs-plugin-installer.recent-searches'
+
 const navItems = [
-  { to: '/', label: 'Dashboard', badge: null, shortcut: ['Alt', '1'] },
-  { to: '/plugins', label: 'Plugins', badge: null, shortcut: ['Alt', '2'] },
-  { to: '/installed', label: 'Installed', badge: null, shortcut: ['Alt', '3'] },
-  { to: '/updates', label: 'Updates', badge: 'updates' as const, shortcut: ['Alt', '4'] },
-  { to: '/settings', label: 'Settings', badge: null, shortcut: ['Alt', '5'] },
+  {
+    to: '/',
+    label: 'Dashboard',
+    subtitle: 'See install health, updates, and OBS status',
+    icon: <Home className="size-4" />,
+    shortcut: ['Alt', '1'],
+    paletteShortcut: 'Alt+1',
+    badge: null,
+  },
+  {
+    to: '/plugins',
+    label: 'Plugins',
+    subtitle: 'Browse the full plugin catalog',
+    icon: <Boxes className="size-4" />,
+    shortcut: ['Alt', '2'],
+    paletteShortcut: 'Alt+2',
+    badge: null,
+  },
+  {
+    to: '/installed',
+    label: 'Installed',
+    subtitle: 'Review managed and external installs',
+    icon: <Boxes className="size-4" />,
+    shortcut: ['Alt', '3'],
+    paletteShortcut: 'Alt+3',
+    badge: null,
+  },
+  {
+    to: '/updates',
+    label: 'Updates',
+    subtitle: 'Review update-ready app-owned installs',
+    icon: <Download className="size-4" />,
+    shortcut: ['Alt', '4'],
+    paletteShortcut: 'Alt+4',
+    badge: 'updates' as const,
+  },
+  {
+    to: '/settings',
+    label: 'Settings',
+    subtitle: 'OBS paths, app updates, and preferences',
+    icon: <Settings className="size-4" />,
+    shortcut: ['Alt', '5'],
+    paletteShortcut: 'Alt+5',
+    badge: null,
+  },
+  {
+    to: '/feedback',
+    label: 'Support',
+    subtitle: 'Report problems, send feedback, or request plugins',
+    icon: <MessageSquareMore className="size-4" />,
+    shortcut: ['Alt', '6'],
+    paletteShortcut: 'Alt+6',
+    badge: null,
+  },
 ]
 
-const RECENT_SEARCHES_STORAGE_KEY = 'obs-plugin-installer.recent-searches'
+const altRouteByKey = new Map(
+  navItems.map((item) => [item.shortcut[item.shortcut.length - 1], item.to]),
+)
 
 function isEditableTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) {
@@ -57,6 +111,10 @@ function canDismissInstallProgress(progress: InstallProgressEvent | null) {
     progress.stage === 'review' ||
     progress.stage === 'manual'
   )
+}
+
+function formatShortcutTitle(shortcut: string[]) {
+  return shortcut.join('+')
 }
 
 export function AppShell() {
@@ -168,13 +226,15 @@ export function AppShell() {
 
   const commandPaletteSections = useMemo<CommandPaletteSection[]>(() => {
     const query = commandPaletteQuery.trim()
-    const navigationItems = [
-      { id: 'nav-dashboard', title: 'Dashboard', subtitle: 'See install health, updates, and OBS status', icon: <Home className="size-4" />, shortcut: 'Alt+1', onSelect: () => navigate('/') },
-      { id: 'nav-plugins', title: 'Plugins', subtitle: 'Browse the full plugin catalog', icon: <Boxes className="size-4" />, shortcut: 'Alt+2', onSelect: () => navigate('/plugins') },
-      { id: 'nav-installed', title: 'Installed', subtitle: 'Review managed and external installs', icon: <Boxes className="size-4" />, shortcut: 'Alt+3', onSelect: () => navigate('/installed') },
-      { id: 'nav-updates', title: 'Updates', subtitle: 'Review update-ready app-owned installs', icon: <Download className="size-4" />, shortcut: 'Alt+4', onSelect: () => navigate('/updates') },
-      { id: 'nav-settings', title: 'Settings', subtitle: 'OBS paths, app updates, and preferences', icon: <Settings className="size-4" />, shortcut: 'Alt+5', onSelect: () => navigate('/settings') },
-    ]
+    const navigationItems = navItems.map((item) => ({
+      id: `nav-${item.label.toLowerCase()}`,
+      title: item.label,
+      subtitle: item.subtitle,
+      icon: item.icon,
+      shortcut: item.paletteShortcut,
+      onSelect: () => navigate(item.to),
+      badge: item.badge === 'updates' && updatesReady > 0 ? String(updatesReady) : undefined,
+    }))
 
     const commandItems = [
       {
@@ -275,6 +335,7 @@ export function AppShell() {
     recentSearches,
     rememberSearch,
     setSearchQuery,
+    updatesReady,
   ])
 
   useEffect(() => {
@@ -306,18 +367,7 @@ export function AppShell() {
       }
 
       if (event.altKey && !modifierKey && !event.shiftKey) {
-        const route =
-          key === '1'
-            ? '/'
-            : key === '2'
-              ? '/plugins'
-            : key === '3'
-                ? '/installed'
-              : key === '4'
-                  ? '/updates'
-                : key === '5'
-                  ? '/settings'
-                  : null
+        const route = altRouteByKey.get(key)
 
         if (route) {
           event.preventDefault()
@@ -348,7 +398,7 @@ export function AppShell() {
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [clearInstallProgress, closeCommandPalette, installProgress, isCommandPaletteOpen, navigate, openCommandPalette, searchQuery, setSearchQuery])
+  }, [clearInstallProgress, closeCommandPalette, installProgress, isCommandPaletteOpen, navigate, openCommandPalette])
 
   return (
     <>
@@ -362,7 +412,7 @@ export function AppShell() {
           </div>
 
           <nav className="flex-1 space-y-1 px-3 py-3">
-            {navItems.map((item, index) => (
+            {navItems.map((item) => (
               <NavLink
                 className={({ isActive }) =>
                   [
@@ -374,7 +424,7 @@ export function AppShell() {
                 }
                 end={item.to === '/'}
                 key={item.to}
-                title={`Go to ${item.label} (Alt+${index + 1})`}
+                title={`Go to ${item.label} (${formatShortcutTitle(item.shortcut)})`}
                 to={item.to}
               >
                 {({ isActive }) => (
@@ -451,6 +501,15 @@ export function AppShell() {
 
               <div className="flex items-center gap-2">
                 <ObsVersionBadge detection={bootstrap?.obsDetection} />
+                <Button
+                  size="sm"
+                  title="Open support (Alt+6)"
+                  variant="ghost"
+                  onClick={() => navigate('/feedback')}
+                >
+                  <MessageSquareMore className="size-4" />
+                  Support
+                </Button>
                 <Button
                   size="sm"
                   title="Open settings (Ctrl/Cmd+, or Alt+5)"

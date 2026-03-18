@@ -1,4 +1,5 @@
 import { type ReactNode, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Bell,
   BrushCleaning,
@@ -63,6 +64,11 @@ const keyboardShortcuts = [
     title: 'Go to Settings',
     description: 'Open this page directly from anywhere in the app shell.',
     keys: ['Alt', '5'],
+  },
+  {
+    title: 'Open feedback and requests',
+    description: 'Jump to the in-app support intake screen.',
+    keys: ['Alt', '6'],
   },
   {
     title: 'Close command palette or finished install modal',
@@ -153,6 +159,7 @@ function SettingSection({
 }
 
 export function SettingsPage() {
+  const navigate = useNavigate()
   const bootstrap = useAppStore((state) => state.bootstrap)
   const chooseObsDirectory = useAppStore((state) => state.chooseObsDirectory)
   const updateSettings = useAppStore((state) => state.updateSettings)
@@ -239,6 +246,25 @@ export function SettingsPage() {
               <p className="mt-4 text-xs leading-6 text-slate-500">
                 Shortcut handlers ignore active text inputs except the explicit search shortcuts.
               </p>
+            </div>
+          </SettingSection>
+
+          <SettingSection
+            icon={<Bell className="size-5" />}
+            title="Support & Requests"
+          >
+            <div className="rounded-[24px] border border-white/10 bg-white/[0.04] p-6">
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="font-semibold text-white">Open the in-app support screen</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-400">
+                    Report bugs, send feedback, or request a plugin from the desktop app.
+                  </p>
+                </div>
+                <Button size="sm" variant="secondary" onClick={() => navigate('/feedback')}>
+                  Open support
+                </Button>
+              </div>
             </div>
           </SettingSection>
 
