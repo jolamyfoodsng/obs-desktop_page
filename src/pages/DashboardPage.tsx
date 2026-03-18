@@ -295,10 +295,10 @@ export function DashboardPage() {
                 <Stethoscope className="size-4" />
                 Open diagnostics
               </Button>
-              <Button variant="outline" onClick={() => void detectObs()}>
+              {/* <Button variant="outline" onClick={() => void detectObs()}>
                 <FolderSearch2 className="size-4" />
                 Scan OBS
-              </Button>
+              </Button> */}
             </div>
           </section>
 
