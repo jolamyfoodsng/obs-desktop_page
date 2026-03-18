@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { HashRouter, Route, Routes } from 'react-router-dom'
 import { AlertTriangle, LoaderCircle, RotateCcw } from 'lucide-react'
 import { coerce, lt } from 'semver'
+
 import { Toaster } from 'sonner'
 
 import { AppUpdateDialog } from './components/AppUpdateDialog'
