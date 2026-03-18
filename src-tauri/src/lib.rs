@@ -7,8 +7,8 @@ use commands::detect_obs::{
     choose_obs_directory, detect_obs, save_obs_path, validate_obs_path_command,
 };
 use commands::install_plugin::{
-    cancel_plugin_install, get_github_release_info, install_plugin, open_external,
-    open_local_path, reveal_path, InstallCancellationRegistry,
+    cancel_plugin_install, get_github_release_info, install_plugin, open_external, open_local_path,
+    reveal_path, InstallCancellationRegistry,
 };
 use commands::settings::{
     clear_app_cache, export_logs, reset_app_state, save_app_settings, sync_autostart_setting,
@@ -16,13 +16,14 @@ use commands::settings::{
 };
 use commands::state::{adopt_installation, bootstrap};
 use commands::store::load_state;
+use commands::support::submit_support_request;
 use commands::update::{
     check_app_update, clear_cached_app_update, download_app_update, get_cached_app_update_snapshot,
     install_app_update, AppUpdateRegistry,
 };
 use tauri::{
-    menu::MenuEvent,
     menu::MenuBuilder,
+    menu::MenuEvent,
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     Manager, WindowEvent,
 };
@@ -122,6 +123,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             capture_analytics_event,
+            submit_support_request,
             bootstrap,
             detect_obs,
             choose_obs_directory,
