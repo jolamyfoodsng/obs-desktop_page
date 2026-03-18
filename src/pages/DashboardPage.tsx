@@ -6,6 +6,7 @@ import {
   PackageCheck,
   ShieldCheck,
   Stethoscope,
+  MessageSquareMore,
 } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 
@@ -292,6 +293,10 @@ export function DashboardPage() {
               <Button variant="secondary" onClick={() => navigate('/diagnostics')}>
                 <Stethoscope className="size-4" />
                 Open diagnostics
+              </Button>
+              <Button variant="secondary" onClick={() => navigate('/feedback')}>
+                <MessageSquareMore className="size-4" />
+                Open support center
               </Button>
               {/* <Button variant="outline" onClick={() => void detectObs()}>
                 <FolderSearch2 className="size-4" />
