@@ -17,6 +17,7 @@ import { DiagnosticsPage } from './pages/DiagnosticsPage'
 import { DiscoverPage } from './pages/DiscoverPage'
 import { InstalledPage } from './pages/InstalledPage'
 import { PluginDetailsPage } from './pages/PluginDetailsPage'
+import { FeedbackPage } from './pages/FeedbackPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { UpdatesPage } from './pages/UpdatesPage'
 import { useAppStore } from './stores/appStore'
@@ -384,6 +385,7 @@ function App() {
               <Route element={<InstalledPage />} path="installed" />
               <Route element={<UpdatesPage />} path="updates" />
               <Route element={<SettingsPage />} path="settings" />
+              <Route element={<FeedbackPage />} path="feedback" />
               <Route element={<PluginDetailsPage />} path="plugin/:pluginId" />
             </Route>
           </Routes>

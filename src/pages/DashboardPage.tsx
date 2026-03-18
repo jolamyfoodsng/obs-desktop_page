@@ -3,7 +3,6 @@ import {
   ArrowRight,
   Boxes,
   Download,
-  FolderSearch2,
   PackageCheck,
   ShieldCheck,
   Stethoscope,
@@ -42,7 +41,6 @@ export function DashboardPage() {
   const navigate = useNavigate()
   const bootstrap = useAppStore((state) => state.bootstrap)
   const checkForAppUpdate = useAppStore((state) => state.checkForAppUpdate)
-  const detectObs = useAppStore((state) => state.detectObs)
   const installPlugin = useAppStore((state) => state.installPlugin)
 
   if (!bootstrap) {

@@ -8,6 +8,7 @@ import {
   RefreshCw,
   Search,
   Settings,
+  MessageSquareMore,
   Wrench,
 } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
@@ -28,6 +29,7 @@ const navItems = [
   { to: '/installed', label: 'Installed', badge: null, shortcut: ['Alt', '3'] },
   { to: '/updates', label: 'Updates', badge: 'updates' as const, shortcut: ['Alt', '4'] },
   { to: '/settings', label: 'Settings', badge: null, shortcut: ['Alt', '5'] },
+  { to: '/feedback', label: 'Feedback', badge: null, shortcut: ['Alt', '6'] },
 ]
 
 const RECENT_SEARCHES_STORAGE_KEY = 'obs-plugin-installer.recent-searches'
@@ -174,6 +176,7 @@ export function AppShell() {
       { id: 'nav-installed', title: 'Installed', subtitle: 'Review managed and external installs', icon: <Boxes className="size-4" />, shortcut: 'Alt+3', onSelect: () => navigate('/installed') },
       { id: 'nav-updates', title: 'Updates', subtitle: 'Review update-ready app-owned installs', icon: <Download className="size-4" />, shortcut: 'Alt+4', onSelect: () => navigate('/updates') },
       { id: 'nav-settings', title: 'Settings', subtitle: 'OBS paths, app updates, and preferences', icon: <Settings className="size-4" />, shortcut: 'Alt+5', onSelect: () => navigate('/settings') },
+      { id: 'nav-feedback', title: 'Feedback', subtitle: 'Report problems, send feedback, or request plugins', icon: <MessageSquareMore className="size-4" />, shortcut: 'Alt+6', onSelect: () => navigate('/feedback') },
     ]
 
     const commandItems = [
@@ -317,6 +320,8 @@ export function AppShell() {
                   ? '/updates'
                 : key === '5'
                   ? '/settings'
+                : key === '6'
+                  ? '/feedback'
                   : null
 
         if (route) {

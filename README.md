@@ -80,6 +80,46 @@ npm run build:release
 
 This runs a full Tauri release build and produces distributable bundles under `src-tauri/target/release/bundle/`.
 
+## Feedback / requests backend
+
+The desktop app now includes an in-app feedback screen backed by a lightweight Vercel Function.
+
+### Chosen approach
+
+- Vercel serverless API for the intake route, because this repo already ships Vercel functions for desktop updates
+- Email relay delivery via Resend, because early-stage support traffic is usually best handled in a shared inbox instead of building a queue database too early
+- No secrets in the Tauri client; the desktop app only posts JSON to the public support endpoint
+
+### Support route
+
+- `api/support.ts`
+  - accepts `POST` JSON submissions
+  - validates all incoming fields server-side
+  - applies lightweight in-memory rate limiting
+  - relays valid requests to the configured support inbox
+
+Supported submission kinds:
+
+- `problem-report`
+- `general-feedback`
+- `plugin-request`
+
+### Required environment variables
+
+Set these in the Vercel project used by the desktop app:
+
+- `RESEND_API_KEY`
+- `SUPPORT_INBOX_EMAIL`
+- `SUPPORT_FROM_EMAIL`
+- `VITE_SUPPORT_API_BASE_URL` for the desktop build, for example `https://updates.example.com`
+
+### Production-safe MVP behavior
+
+- all validation happens on the server
+- plugin requests require a valid `http` or `https` URL
+- reply emails are optional and only used as the `reply_to` value
+- submissions land in the support inbox for triage and follow-up
+
 ## Private update system
 
 This app now supports a private, Vercel-backed update pipeline for Tauri v2.
