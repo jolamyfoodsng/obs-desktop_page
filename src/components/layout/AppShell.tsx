@@ -9,9 +9,7 @@ import {
   RefreshCw,
   Search,
   Settings,
-  MessageSquareMore,
   Wrench,
-  MessageSquareMore,
 } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 
