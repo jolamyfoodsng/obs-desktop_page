@@ -112,8 +112,9 @@ Set these in the Vercel project used by the desktop app:
 - `SUPPORT_INBOX_EMAIL`
 - `SUPPORT_FROM_EMAIL`
 - `VITE_SUPPORT_API_BASE_URL` for the desktop build, for example `https://updates.example.com`
+- optional runtime override: `SUPPORT_API_BASE_URL`
 
-Set `VITE_SUPPORT_API_BASE_URL` in the GitHub Actions repository variables too, otherwise packaged desktop releases will not have the production support endpoint baked into the frontend bundle.
+Set `VITE_SUPPORT_API_BASE_URL` in the GitHub Actions repository variables too, otherwise packaged desktop releases will not have the production support endpoint baked into the frontend bundle. The Tauri app also now checks runtime `SUPPORT_API_BASE_URL` first and falls back to `TAURI_UPDATE_BASE_URL` when both APIs live on the same Vercel deployment.
 
 ### Production-safe MVP behavior
 

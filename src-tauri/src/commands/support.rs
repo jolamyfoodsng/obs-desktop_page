@@ -5,6 +5,19 @@ use std::time::Duration;
 
 const DEFAULT_SUPPORT_API_BASE_URL: &str = "https://obs-desktop-page.vercel.app";
 
+fn runtime_or_build_var(name: &str, build_value: Option<&str>) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(|| {
+            build_value
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToOwned::to_owned)
+        })
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SupportSubmissionRequest {
@@ -41,11 +54,18 @@ pub struct SupportSubmissionSuccess {
 }
 
 fn support_api_url() -> String {
-    let configured = option_env!("VITE_SUPPORT_API_BASE_URL")
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(DEFAULT_SUPPORT_API_BASE_URL)
-        .trim_end_matches('/');
+    let configured = runtime_or_build_var(
+        "SUPPORT_API_BASE_URL",
+        option_env!("VITE_SUPPORT_API_BASE_URL"),
+    )
+    .or_else(|| {
+        runtime_or_build_var(
+            "TAURI_UPDATE_BASE_URL",
+            option_env!("TAURI_UPDATE_BASE_URL"),
+        )
+    })
+    .unwrap_or_else(|| DEFAULT_SUPPORT_API_BASE_URL.to_string());
+    let configured = configured.trim_end_matches('/');
 
     format!("{configured}/api/support")
 }
