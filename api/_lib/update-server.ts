@@ -267,6 +267,10 @@ function getEnv(name: string) {
   return value
 }
 
+function getOptionalEnv(name: string) {
+  return process.env[name]?.trim() || null
+}
+
 function normalizeVersion(value: string | undefined | null) {
   if (!value) {
     return null
@@ -374,14 +378,14 @@ function inferBaseUrl(request: VercelRequest) {
 }
 
 async function githubJson<T>(path: string) {
-  const token = getEnv('GITHUB_TOKEN')
   const owner = getEnv('GITHUB_OWNER')
   const repo = getEnv('GITHUB_REPO')
+  const token = getOptionalEnv('GITHUB_TOKEN')
 
   const response = await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}${path}`, {
     headers: {
       Accept: 'application/vnd.github+json',
-      Authorization: `Bearer ${token}`,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       'User-Agent': 'obs-plugin-installer-update-server',
       'X-GitHub-Api-Version': '2022-11-28',
     },
@@ -617,12 +621,12 @@ function resolveSelectionForTarget(release: GitHubRelease, target: SupportedTarg
 }
 
 async function fetchSignature(asset: GitHubReleaseAsset) {
-  const token = getEnv('GITHUB_TOKEN')
+  const token = getOptionalEnv('GITHUB_TOKEN')
 
   const response = await fetch(asset.url, {
     headers: {
       Accept: 'application/octet-stream',
-      Authorization: `Bearer ${token}`,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       'User-Agent': 'obs-plugin-installer-update-server',
       'X-GitHub-Api-Version': '2022-11-28',
     },
