@@ -159,8 +159,12 @@ export function validateSupportSubmission(payload: unknown) {
     return { error: { field: 'subject', message: 'Subject is too long.' } }
   }
 
+  if (!email) {
+    return { error: { field: 'email', message: 'Email is required.' } }
+  }
+
   if (!isValidEmail(email)) {
-    return { error: { field: 'email', message: 'Email address looks invalid.' } }
+    return { error: { field: 'email', message: 'Enter a valid email address.' } }
   }
 
   if (kind === 'plugin-request') {

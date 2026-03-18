@@ -113,11 +113,13 @@ Set these in the Vercel project used by the desktop app:
 - `SUPPORT_FROM_EMAIL`
 - `VITE_SUPPORT_API_BASE_URL` for the desktop build, for example `https://updates.example.com`
 
+Set `VITE_SUPPORT_API_BASE_URL` in the GitHub Actions repository variables too, otherwise packaged desktop releases will not have the production support endpoint baked into the frontend bundle.
+
 ### Production-safe MVP behavior
 
 - all validation happens on the server
 - plugin requests require a valid `http` or `https` URL
-- reply emails are optional and only used as the `reply_to` value
+- reply emails are required so support can follow up on every submission
 - submissions land in the support inbox for triage and follow-up
 
 ## Private update system

@@ -9,10 +9,13 @@ import {
 } from './_lib/support.js'
 
 export default async function handler(request: VercelRequest, response: VercelResponse) {
-  response.setHeader('Access-Control-Allow-Origin', '*')
+  const requestOrigin = typeof request.headers.origin === 'string' ? request.headers.origin : null
+
   response.setHeader('Access-Control-Allow-Headers', 'Content-Type')
   response.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
+  response.setHeader('Access-Control-Allow-Origin', requestOrigin ?? '*')
   response.setHeader('Access-Control-Max-Age', '86400')
+  response.setHeader('Vary', 'Origin')
 
   if (request.method === 'OPTIONS') {
     response.status(204).end()
