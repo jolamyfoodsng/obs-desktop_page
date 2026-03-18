@@ -1,5 +1,5 @@
+import { LoaderCircle, MessageSquare, Send, Siren, Sparkles } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { LifeBuoy, LoaderCircle, MessageSquare, Send, Siren, Sparkles } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '../components/ui/Button'
@@ -287,6 +287,7 @@ export function FeedbackPage() {
                   placeholder="you@example.com"
                   required
                   type="email"
+
                   value={email}
                 />
                 <p className="text-xs leading-5 text-slate-500">{activeDefinition.emailHelperText}</p>
@@ -294,7 +295,7 @@ export function FeedbackPage() {
               </label>
 
               <label className="space-y-2">
-                <span className="text-sm font-medium text-slate-200">Subject <span className="text-slate-500">optional</span></span>
+                <span className="text-sm font-medium text-slate-400">Subject <span className="text-slate-500">optional</span></span>
                 <input
                   className={inputClassName(Boolean(formErrors.subject))}
                   maxLength={160}
@@ -312,7 +313,7 @@ export function FeedbackPage() {
 
             {activeFlow === 'plugin-request' ? (
               <label className="space-y-2">
-                <span className="text-sm font-medium text-slate-200">Plugin link</span>
+                <span className="text-sm font-medium text-slate-400">Plugin link</span>
                 <input
                   className={inputClassName(Boolean(formErrors.pluginUrl))}
                   onChange={(event) => {
@@ -330,7 +331,7 @@ export function FeedbackPage() {
             ) : null}
 
             <label className="space-y-2">
-              <span className="text-sm font-medium text-slate-200">Message</span>
+              <span className="text-sm font-medium text-slate-400">Message</span>
               <textarea
                 className={`${inputClassName(Boolean(formErrors.message))} min-h-40 resize-y`}
                 maxLength={4000}
@@ -348,7 +349,7 @@ export function FeedbackPage() {
 
             <div className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-black/20 p-4 text-sm text-slate-400 md:flex-row md:items-center md:justify-between">
               <div className="space-y-1">
-                <p>OBS version: <span className="text-slate-200">{obsVersion ?? 'Not detected'}</span></p>
+                <p>OBS version: <span className="text-slate-400">{obsVersion ?? 'Not detected'}</span></p>
                 <p>Desktop submissions include app version, platform, and install ID automatically.</p>
               </div>
               <Button className="min-w-[220px]" disabled={isSubmitting} size="lg" type="submit">
@@ -372,19 +373,6 @@ export function FeedbackPage() {
           </form>
         </section>
 
-        <aside className="space-y-4">
-          <section className="rounded-[24px] border border-white/10 bg-white/[0.04] p-5">
-            <div className="flex items-center gap-3 text-primary">
-              <LifeBuoy className="size-5" />
-              <h3 className="text-lg font-semibold text-white">How this is handled</h3>
-            </div>
-            <ul className="mt-4 space-y-3 text-sm leading-6 text-slate-400">
-              <li>• Requests are posted to a Vercel serverless intake route.</li>
-              <li>• The backend validates the payload and rejects malformed submissions.</li>
-              <li>• Valid submissions are relayed to the support inbox for triage.</li>
-              <li>• No secrets are stored in the Tauri frontend.</li>
-            </ul>
-          </section>
 
           <section className="rounded-[24px] border border-white/10 bg-white/[0.04] p-5">
             <div className="flex items-center gap-3 text-primary">
