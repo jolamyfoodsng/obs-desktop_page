@@ -16,7 +16,6 @@ interface RequiredUpdateScreenProps {
   onBypass: () => void
   onDownload: () => void
   onInstall: () => void
-  onRetry: () => void
   onOpenManualFallback?: () => void
 }
 
@@ -41,7 +40,6 @@ export function RequiredUpdateScreen({
   onBypass,
   onDownload,
   onInstall,
-  onRetry,
   onOpenManualFallback,
 }: RequiredUpdateScreenProps) {
   return (
