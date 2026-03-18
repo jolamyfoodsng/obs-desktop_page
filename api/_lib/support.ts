@@ -31,7 +31,7 @@ export interface NormalizedSupportSubmission {
 }
 
 function json(response: VercelResponse, status: number, payload: Record<string, unknown>) {
-  response.status(status).json(payload)
+  return response.status(status).json(payload)
 }
 
 export function sendSupportError(response: VercelResponse, status: number, message: string, field?: string) {
