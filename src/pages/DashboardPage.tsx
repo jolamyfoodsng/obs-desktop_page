@@ -111,6 +111,7 @@ export function DashboardPage() {
       activityDate.getFullYear() === now.getFullYear() &&
       activityDate.getMonth() === now.getMonth() &&
       entry.managed &&
+
       (entry.action === 'install' || entry.action === 'adopt')
     )
   }).length
