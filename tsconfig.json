@@ -1,4 +1,11 @@
 {
+  "compilerOptions": {
+    "skipLibCheck": true,
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ESNext", "esnext.disposable"]
+  },
   "files": [],
   "references": [
     { "path": "./tsconfig.app.json" },

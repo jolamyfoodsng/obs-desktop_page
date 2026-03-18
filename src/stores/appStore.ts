@@ -66,6 +66,8 @@ function classifyAppUpdate(snapshot: AppUpdateSnapshot): AppUpdateStatus {
   const minimumSupportedVersion = normalizeVersion(snapshot.minimumSupportedVersion ?? null)
 
   if (!currentVersion || !latestVersion) {
+    // eslint-disable-next-line no-console
+    console.debug('classifyAppUpdate: Missing version info', { currentVersion, latestVersion, status: snapshot.status })
     return snapshot.status
   }
 
@@ -204,6 +206,11 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
       const snapshot = await desktopApi.checkAppUpdate()
       const nextStatus = classifyAppUpdate(snapshot)
 
+      // Debug: log snapshot and classification to help diagnose UI visibility issues
+      // Remove or guard behind a dev flag if this is noisy in production.
+      // eslint-disable-next-line no-console
+      console.debug('checkForAppUpdate: snapshot=', snapshot, 'nextStatus=', nextStatus, 'dismissed=', get().dismissedAppUpdateVersion)
+
       if (options?.forcePrompt && snapshot.latestVersion) {
         writeDismissedAppUpdateVersion(null)
       }
@@ -241,26 +248,26 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
       set((state) => ({
         appUpdate: state.appUpdate
           ? {
-              ...state.appUpdate,
-              status: 'failed',
-              message,
-            }
+            ...state.appUpdate,
+            status: 'failed',
+            message,
+          }
           : {
-              status: 'failed',
-              message,
-              currentVersion: state.bootstrap?.currentVersion ?? '0.0.0',
-              latestVersion: null,
-              minimumSupportedVersion: null,
-              releaseNotes: null,
-              publishedAt: null,
-              updateChannel: state.bootstrap?.settings.betaUpdates ? 'beta' : 'stable',
-              releaseTag: null,
-              releaseUrl: null,
-              selectedAssetName: null,
-              selectedAssetReason: null,
-              selectedAssetUrl: null,
-              selectedAssetSize: null,
-            },
+            status: 'failed',
+            message,
+            currentVersion: state.bootstrap?.currentVersion ?? '0.0.0',
+            latestVersion: null,
+            minimumSupportedVersion: null,
+            releaseNotes: null,
+            publishedAt: null,
+            updateChannel: state.bootstrap?.settings.betaUpdates ? 'beta' : 'stable',
+            releaseTag: null,
+            releaseUrl: null,
+            selectedAssetName: null,
+            selectedAssetReason: null,
+            selectedAssetUrl: null,
+            selectedAssetSize: null,
+          },
         appUpdateStatus: 'failed',
         appUpdateProgress: null,
         isCheckingAppUpdate: false,
@@ -293,6 +300,10 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     try {
       const snapshot = await desktopApi.downloadAppUpdate()
       const nextStatus = classifyAppUpdate(snapshot)
+
+      // Debug: log download result and classification
+      // eslint-disable-next-line no-console
+      console.debug('downloadAppUpdate: snapshot=', snapshot, 'nextStatus=', nextStatus)
       set({
         appUpdate: snapshot,
         appUpdateStatus: nextStatus,
@@ -337,10 +348,10 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
         isApplyingAppUpdate: false,
         appUpdate: state.appUpdate
           ? {
-              ...state.appUpdate,
-              status: 'failed',
-              message,
-            }
+            ...state.appUpdate,
+            status: 'failed',
+            message,
+          }
           : state.appUpdate,
         appUpdateStatus: 'failed',
       }))
@@ -443,9 +454,9 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
       isSettingsWorking: true,
       bootstrap: state.bootstrap
         ? {
-            ...state.bootstrap,
-            settings: nextSettings,
-          }
+          ...state.bootstrap,
+          settings: nextSettings,
+        }
         : state.bootstrap,
     }))
 
@@ -455,9 +466,9 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
         isSettingsWorking: false,
         bootstrap: state.bootstrap
           ? {
-              ...state.bootstrap,
-              settings: savedSettings,
-            }
+            ...state.bootstrap,
+            settings: savedSettings,
+          }
           : state.bootstrap,
       }))
 
@@ -470,9 +481,9 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
         isSettingsWorking: false,
         bootstrap: state.bootstrap
           ? {
-              ...state.bootstrap,
-              settings: currentSettings,
-            }
+            ...state.bootstrap,
+            settings: currentSettings,
+          }
           : state.bootstrap,
       }))
       toast.error(getErrorMessage(error, 'Could not save these app settings.'))
@@ -585,16 +596,16 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
             cancelingInstallPluginId: null,
             installProgress:
               state.installProgress?.pluginId === pluginId &&
-              state.installProgress.stage === 'canceled'
+                state.installProgress.stage === 'canceled'
                 ? state.installProgress
                 : {
-                    pluginId,
-                    stage: 'canceled',
-                    progress: 100,
-                    message: 'Download canceled',
-                    detail: response.message,
-                    terminal: true,
-                  },
+                  pluginId,
+                  stage: 'canceled',
+                  progress: 100,
+                  message: 'Download canceled',
+                  detail: response.message,
+                  terminal: true,
+                },
           }))
           await get().loadApp()
           return response
@@ -809,6 +820,9 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   },
 
   handleAppUpdateProgress(progress) {
+    // eslint-disable-next-line no-console
+    console.debug('handleAppUpdateProgress:', progress)
+
     set({
       appUpdateProgress: progress,
       appUpdateStatus: progress.stage === 'finished' ? 'ready-to-restart' : 'downloading',

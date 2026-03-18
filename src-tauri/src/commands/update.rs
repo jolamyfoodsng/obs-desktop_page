@@ -64,6 +64,13 @@ fn runtime_or_build_var(name: &str, build_value: Option<&str>) -> Option<String>
 
 fn update_base_url() -> Option<String> {
     runtime_or_build_var("TAURI_UPDATE_BASE_URL", option_env!("TAURI_UPDATE_BASE_URL"))
+        .or_else(|| {
+            if cfg!(debug_assertions) {
+                Some("http://localhost:3001".to_string())
+            } else {
+                Some("https://obs-desktop-page.vercel.app".to_string())
+            }
+        })
         .map(|value| value.trim_end_matches('/').to_string())
 }
 

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { HashRouter, Route, Routes } from 'react-router-dom'
 import { AlertTriangle, LoaderCircle, RotateCcw } from 'lucide-react'
-import { coerce, lt } from 'semver'
 
 import { Toaster } from 'sonner'
 
@@ -22,7 +21,7 @@ import { PluginDetailsPage } from './pages/PluginDetailsPage'
 import { SettingsPage } from './pages/SettingsPage'
 import { UpdatesPage } from './pages/UpdatesPage'
 import { useAppStore } from './stores/appStore'
-import type { AccentColor, AppUpdateSnapshot, ThemeMode } from './types/desktop'
+import type { AccentColor, ThemeMode } from './types/desktop'
 
 const accentColorMap: Record<AccentColor, string> = {
   purple: '78 121 255',
@@ -61,20 +60,6 @@ function LoadingScreen() {
   )
 }
 
-function isRequiredUpdate(snapshot: AppUpdateSnapshot | null) {
-  if (!snapshot?.minimumSupportedVersion) {
-    return false
-  }
-
-  const currentVersion = coerce(snapshot.currentVersion)?.version
-  const minimumSupportedVersion = coerce(snapshot.minimumSupportedVersion)?.version
-
-  if (!currentVersion || !minimumSupportedVersion) {
-    return false
-  }
-
-  return lt(currentVersion, minimumSupportedVersion)
-}
 
 function StartupErrorScreen({
   error,
@@ -328,17 +313,36 @@ function App() {
   const canBypassRequiredUpdate = import.meta.env.DEV && bootstrap.settings.developerMode
   const allowRequiredUpdateBypass =
     canBypassRequiredUpdate && bypassedRequiredUpdateVersion === appUpdate?.latestVersion
-  const requiredUpdateBlocked = isRequiredUpdate(appUpdate) && !allowRequiredUpdateBypass
+
+  // Treat any update (optional or required) as a blocking update for this app.
+  // Use appUpdateStatus from the store to ensure we capture server-classified updates.
+  const requiredUpdateBlocked =
+    (appUpdateStatus === 'update-available' || appUpdateStatus === 'update-required') &&
+    !allowRequiredUpdateBypass
+
   const showOptionalUpdateDialog = Boolean(
     appUpdate &&
-      !requiredUpdateBlocked &&
-      ((appUpdateStatus === 'update-available' &&
-        dismissedAppUpdateVersion !== appUpdate.latestVersion) ||
-        appUpdateStatus === 'downloading' ||
-        appUpdateStatus === 'ready-to-restart' ||
-        (appUpdateStatus === 'failed' &&
-          Boolean(appUpdate.latestVersion || appUpdate.selectedAssetUrl))),
+    !requiredUpdateBlocked &&
+    (appUpdateStatus === 'downloading' ||
+      appUpdateStatus === 'ready-to-restart' ||
+      (appUpdateStatus === 'failed' &&
+        (Boolean(appUpdate.latestVersion || appUpdate.selectedAssetUrl) ||
+          appUpdate.status === 'failed'))),
   )
+
+  // Trace the decision path for the update modal
+  if (import.meta.env.DEV || bootstrap.settings.developerMode) {
+    // eslint-disable-next-line no-console
+    console.debug('[App] Update state:', {
+      appUpdateStatus,
+      requiredUpdateBlocked,
+      showOptionalUpdateDialog,
+      latestVersion: appUpdate?.latestVersion,
+      dismissedVersion: dismissedAppUpdateVersion,
+      minimumSupportedVersion: appUpdate?.minimumSupportedVersion,
+      hasSelectedAsset: Boolean(appUpdate?.selectedAssetUrl),
+    })
+  }
 
   const needsSetup =
     !bootstrap.settings.setupCompleted || !bootstrap.settings.obsPath

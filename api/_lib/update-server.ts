@@ -257,11 +257,12 @@ interface ResolveCatalogOptions {
   channel?: string
   releaseVersion?: string
 }
-
 function getEnv(name: string) {
   const value = process.env[name]?.trim()
   if (!value) {
-    throw new Error(`Missing required environment variable: ${name}`)
+    throw new Error(
+      `Missing required environment variable: ${name}. Please set this in your .env.local (dev) or Vercel Environment Variables (prod).`,
+    )
   }
   return value
 }
@@ -465,10 +466,6 @@ function scoreAssetCandidate(
 ) {
   const fileName = asset.name.toLowerCase()
 
-  if (!signatureAsset) {
-    return { reason: 'missing updater signature', score: -1 }
-  }
-
   if (isSourceOnlyAsset(asset.name)) {
     return { reason: 'source archive or checksum asset', score: -1 }
   }
@@ -486,6 +483,12 @@ function scoreAssetCandidate(
   const conflictingArchTokens = ARCH_CONFLICTS[target.arch]
   if (hasAnyToken(fileName, conflictingArchTokens)) {
     return { reason: `conflicts with ${target.arch}`, score: -1 }
+  }
+
+  // Check for signature only AFTER we've confirmed the asset matches the target platform.
+  // This makes diagnostics more accurate and less confusing.
+  if (!signatureAsset) {
+    return { reason: 'missing updater signature', score: -1 }
   }
 
   let score = 0
