@@ -100,6 +100,7 @@ jobs:
           VITE_POSTHOG_PROJECT_KEY: ${{ vars.VITE_POSTHOG_PROJECT_KEY }}
           VITE_POSTHOG_API_HOST: ${{ vars.VITE_POSTHOG_API_HOST }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_UPDATE_BASE_URL: ${{ vars.TAURI_UPDATE_BASE_URL }}
           TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
           TAURI_UPDATE_BUNDLE_TYPE: ${{ matrix.default_update_bundle }}
@@ -115,8 +116,6 @@ jobs:
             src-tauri/target/release/bundle/**/*.msi
             src-tauri/target/release/bundle/**/*.AppImage
             src-tauri/target/release/bundle/**/*.deb
-            src-tauri/target/release/bundle/**/*.app.tar.gz
-            src-tauri/target/release/bundle/**/*.dmg
             src-tauri/target/release/bundle/**/*.sig
 
       - name: Upload release artifacts
@@ -132,8 +131,6 @@ jobs:
             src-tauri/target/release/bundle/**/*.msi
             src-tauri/target/release/bundle/**/*.AppImage
             src-tauri/target/release/bundle/**/*.deb
-            src-tauri/target/release/bundle/**/*.app.tar.gz
-            src-tauri/target/release/bundle/**/*.dmg
             src-tauri/target/release/bundle/**/*.sig
 
   publish-main-release:
@@ -174,8 +171,6 @@ jobs:
             -name '*.msi' -o \
             -name '*.AppImage' -o \
             -name '*.deb' -o \
-            -name '*.app.tar.gz' -o \
-            -name '*.dmg' -o \
             -name '*.sig' \
           \))
 
@@ -209,6 +204,4 @@ jobs:
             release-artifacts/**/*.msi
             release-artifacts/**/*.AppImage
             release-artifacts/**/*.deb
-            release-artifacts/**/*.app.tar.gz
-            release-artifacts/**/*.dmg
             release-artifacts/**/*.sig
