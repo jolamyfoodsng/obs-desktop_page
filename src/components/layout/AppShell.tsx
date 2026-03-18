@@ -8,6 +8,7 @@ import {
   RefreshCw,
   Search,
   Settings,
+  MessageSquareMore,
   Wrench,
   MessageSquareMore,
 } from 'lucide-react'
@@ -28,8 +29,8 @@ const navItems = [
   { to: '/plugins', label: 'Plugins', badge: null, shortcut: ['Alt', '2'] },
   { to: '/installed', label: 'Installed', badge: null, shortcut: ['Alt', '3'] },
   { to: '/updates', label: 'Updates', badge: 'updates' as const, shortcut: ['Alt', '4'] },
-  { to: '/feedback', label: 'Support', badge: null, shortcut: ['Alt', '5'] },
-  { to: '/settings', label: 'Settings', badge: null, shortcut: ['Alt', '6'] },
+  { to: '/settings', label: 'Settings', badge: null, shortcut: ['Alt', '5'] },
+  { to: '/feedback', label: 'Feedback', badge: null, shortcut: ['Alt', '6'] },
 ]
 
 const RECENT_SEARCHES_STORAGE_KEY = 'obs-plugin-installer.recent-searches'
@@ -329,6 +330,8 @@ export function AppShell() {
                   ? '/feedback'
                 : key === '6'
                   ? '/settings'
+                : key === '6'
+                  ? '/feedback'
                   : null
 
         if (route) {

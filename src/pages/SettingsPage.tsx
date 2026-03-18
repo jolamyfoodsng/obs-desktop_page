@@ -67,6 +67,11 @@ const keyboardShortcuts = [
     keys: ['Alt', '5'],
   },
   {
+    title: 'Open feedback and requests',
+    description: 'Jump to the in-app support intake screen.',
+    keys: ['Alt', '6'],
+  },
+  {
     title: 'Close command palette or finished install modal',
     description: 'Dismiss the command palette or a safe install modal state.',
     keys: ['Esc'],
