@@ -9,6 +9,7 @@ import {
   Search,
   Settings,
   Wrench,
+  MessageSquareMore,
 } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 
@@ -27,7 +28,8 @@ const navItems = [
   { to: '/plugins', label: 'Plugins', badge: null, shortcut: ['Alt', '2'] },
   { to: '/installed', label: 'Installed', badge: null, shortcut: ['Alt', '3'] },
   { to: '/updates', label: 'Updates', badge: 'updates' as const, shortcut: ['Alt', '4'] },
-  { to: '/settings', label: 'Settings', badge: null, shortcut: ['Alt', '5'] },
+  { to: '/feedback', label: 'Support', badge: null, shortcut: ['Alt', '5'] },
+  { to: '/settings', label: 'Settings', badge: null, shortcut: ['Alt', '6'] },
 ]
 
 const RECENT_SEARCHES_STORAGE_KEY = 'obs-plugin-installer.recent-searches'
@@ -173,7 +175,8 @@ export function AppShell() {
       { id: 'nav-plugins', title: 'Plugins', subtitle: 'Browse the full plugin catalog', icon: <Boxes className="size-4" />, shortcut: 'Alt+2', onSelect: () => navigate('/plugins') },
       { id: 'nav-installed', title: 'Installed', subtitle: 'Review managed and external installs', icon: <Boxes className="size-4" />, shortcut: 'Alt+3', onSelect: () => navigate('/installed') },
       { id: 'nav-updates', title: 'Updates', subtitle: 'Review update-ready app-owned installs', icon: <Download className="size-4" />, shortcut: 'Alt+4', onSelect: () => navigate('/updates') },
-      { id: 'nav-settings', title: 'Settings', subtitle: 'OBS paths, app updates, and preferences', icon: <Settings className="size-4" />, shortcut: 'Alt+5', onSelect: () => navigate('/settings') },
+      { id: 'nav-feedback', title: 'Support', subtitle: 'Report problems, send feedback, or request plugins', icon: <MessageSquareMore className="size-4" />, shortcut: 'Alt+5', onSelect: () => navigate('/feedback') },
+      { id: 'nav-settings', title: 'Settings', subtitle: 'OBS paths, app updates, and preferences', icon: <Settings className="size-4" />, shortcut: 'Alt+6', onSelect: () => navigate('/settings') },
     ]
 
     const commandItems = [
@@ -204,6 +207,13 @@ export function AppShell() {
         subtitle: 'Run a system health check for OBS and managed installs',
         icon: <Wrench className="size-4" />,
         onSelect: () => navigate('/diagnostics'),
+      },
+      {
+        id: 'command-open-support',
+        title: 'Open support center',
+        subtitle: 'Report issues, send feedback, or request a plugin',
+        icon: <MessageSquareMore className="size-4" />,
+        onSelect: () => navigate('/feedback'),
       },
       {
         id: 'command-open-installed',
@@ -316,6 +326,8 @@ export function AppShell() {
               : key === '4'
                   ? '/updates'
                 : key === '5'
+                  ? '/feedback'
+                : key === '6'
                   ? '/settings'
                   : null
 
