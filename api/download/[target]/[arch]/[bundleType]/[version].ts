@@ -59,11 +59,11 @@ export default async function handler(request: VercelRequest, response: VercelRe
       return sendError(response, 404, 'Requested version does not match the selected release.')
     }
 
-    const token = process.env.GITHUB_TOKEN?.trim()
+    const token = process.env.GITHUB_TOKEN?.trim() || null
     const owner = process.env.GITHUB_OWNER?.trim()
     const repo = process.env.GITHUB_REPO?.trim()
 
-    if (!token || !owner || !repo) {
+    if (!owner || !repo) {
       await safeShutdown(posthog)
       return sendError(response, 500, 'GitHub release proxy is not configured correctly.')
     }
@@ -73,7 +73,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
       {
         headers: {
           Accept: 'application/vnd.github+json',
-          Authorization: `Bearer ${token}`,
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
           'User-Agent': 'obs-plugin-installer-update-server',
           'X-GitHub-Api-Version': '2022-11-28',
         },
@@ -103,7 +103,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
     const assetResponse = await fetch(matchingAsset.url, {
       headers: {
         Accept: 'application/octet-stream',
-        Authorization: `Bearer ${token}`,
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         'User-Agent': 'obs-plugin-installer-update-server',
         'X-GitHub-Api-Version': '2022-11-28',
       },

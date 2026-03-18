@@ -7,7 +7,6 @@ import { Toaster } from 'sonner'
 import { AppUpdateDialog } from './components/AppUpdateDialog'
 import { EmptyState } from './components/EmptyState'
 import { ErrorState } from './components/ErrorState'
-import { RequiredUpdateScreen } from './components/RequiredUpdateScreen'
 import { SetupWizard } from './components/SetupWizard'
 import { AppShell } from './components/layout/AppShell'
 import { getAnalyticsContext, trackAppOpenOnce } from './lib/analytics'
@@ -138,7 +137,6 @@ function App() {
     window.matchMedia('(prefers-color-scheme: light)').matches,
   )
   const [isStartupUpdateCheckComplete, setIsStartupUpdateCheckComplete] = useState(false)
-  const [bypassedRequiredUpdateVersion, setBypassedRequiredUpdateVersion] = useState<string | null>(null)
   const startupUpdateCheckStartedRef = useRef(false)
   const updateCheckInFlightRef = useRef(false)
 
@@ -310,20 +308,17 @@ function App() {
     )
   }
 
-  const canBypassRequiredUpdate = import.meta.env.DEV && bootstrap.settings.developerMode
-  const allowRequiredUpdateBypass =
-    canBypassRequiredUpdate && bypassedRequiredUpdateVersion === appUpdate?.latestVersion
-
   // Treat any update (optional or required) as a blocking update for this app.
   // Use appUpdateStatus from the store to ensure we capture server-classified updates.
   const requiredUpdateBlocked =
-    (appUpdateStatus === 'update-available' || appUpdateStatus === 'update-required') &&
-    !allowRequiredUpdateBypass
+    appUpdateStatus === 'update-available' || appUpdateStatus === 'update-required'
 
-  const showOptionalUpdateDialog = Boolean(
+  const showUpdateDialog = Boolean(
     appUpdate &&
-    !requiredUpdateBlocked &&
-    (appUpdateStatus === 'downloading' ||
+    (requiredUpdateBlocked ||
+      appUpdateStatus === 'update-available' ||
+      appUpdateStatus === 'update-required' ||
+      appUpdateStatus === 'downloading' ||
       appUpdateStatus === 'ready-to-restart' ||
       (appUpdateStatus === 'failed' &&
         (Boolean(appUpdate.latestVersion || appUpdate.selectedAssetUrl) ||
@@ -336,7 +331,7 @@ function App() {
     console.debug('[App] Update state:', {
       appUpdateStatus,
       requiredUpdateBlocked,
-      showOptionalUpdateDialog,
+      showUpdateDialog,
       latestVersion: appUpdate?.latestVersion,
       dismissedVersion: dismissedAppUpdateVersion,
       minimumSupportedVersion: appUpdate?.minimumSupportedVersion,
@@ -347,32 +342,20 @@ function App() {
   const needsSetup =
     !bootstrap.settings.setupCompleted || !bootstrap.settings.obsPath
 
+  const handleUpdateNow = async () => {
+    const downloadSnapshot = await downloadAppUpdate()
+    if (!downloadSnapshot) {
+      return
+    }
+
+    if (downloadSnapshot.status === 'ready-to-restart') {
+      await installAppUpdate()
+    }
+  }
+
   return (
     <>
-      {requiredUpdateBlocked && appUpdate ? (
-        <RequiredUpdateScreen
-          canBypass={canBypassRequiredUpdate}
-          isApplying={isApplyingAppUpdate}
-          onBypass={() => setBypassedRequiredUpdateVersion(appUpdate.latestVersion ?? '__dev__')}
-          onDownload={() => {
-            void downloadAppUpdate()
-          }}
-          onInstall={() => {
-            void installAppUpdate()
-          }}
-          onOpenManualFallback={
-            appUpdate.selectedAssetUrl
-              ? () => void openExternal(appUpdate.selectedAssetUrl ?? '')
-              : undefined
-          }
-          onRetry={() => {
-            void checkForAppUpdate({ forcePrompt: true })
-          }}
-          progress={appUpdateProgress}
-          snapshot={appUpdate}
-          status={appUpdateStatus}
-        />
-      ) : needsSetup ? (
+      {needsSetup ? (
         <SetupWizard
           detection={bootstrap.obsDetection}
           isBusy={isSetupWorking}
@@ -396,12 +379,13 @@ function App() {
           </Routes>
         </HashRouter>
       )}
-      {showOptionalUpdateDialog && appUpdate ? (
+      {showUpdateDialog && appUpdate ? (
         <AppUpdateDialog
           isApplying={isApplyingAppUpdate}
+          isRequired={requiredUpdateBlocked}
           onDismiss={dismissAppUpdate}
           onDownload={() => {
-            void downloadAppUpdate()
+            void handleUpdateNow()
           }}
           onInstall={() => {
             void installAppUpdate()
