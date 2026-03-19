@@ -54,7 +54,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
     await safeShutdown(posthog)
 
     if (payload.status === 'no-update') {
-      response.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=30')
+      response.setHeader('Cache-Control', 'no-store')
       response.status(204).end()
       return
     }
@@ -74,7 +74,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
       return sendError(response, 409, 'Resolved update manifest is missing the platform payload.')
     }
 
-    response.setHeader('Cache-Control', 'public, s-maxage=60, stale-while-revalidate=30')
+    response.setHeader('Cache-Control', 'no-store')
     response.status(200).json({
       version: payload.latestVersion,
       notes: payload.releaseNotes,

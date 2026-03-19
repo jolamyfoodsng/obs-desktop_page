@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { coerce, compare, lt } from 'semver'
 
 const GITHUB_API_BASE = 'https://api.github.com'
-const CACHE_CONTROL = 'public, s-maxage=300, stale-while-revalidate=60'
+const CACHE_CONTROL = 'no-store'
 const UPDATER_KEY_ROTATION_VERSION = '0.40.0'
 
 const SUPPORTED_TARGETS = [
