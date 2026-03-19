@@ -13,9 +13,11 @@ import {
 } from 'lucide-react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 
-import { getInstallMethod, isUpdateAvailable } from '../../lib/utils'
+import { PluginGlyph } from '../../lib/pluginVisuals'
+import { getCatalogPluginState, getInstallMethod, isUpdateAvailable } from '../../lib/utils'
 import { useAppStore } from '../../stores/appStore'
-import type { InstallProgressEvent } from '../../types/desktop'
+import type { InstallProgressEvent, InstalledPluginRecord } from '../../types/desktop'
+import type { PluginCatalogEntry } from '../../types/plugin'
 import { CommandPalette, type CommandPaletteSection } from '../CommandPalette'
 import { InstallProgressModal } from '../InstallProgressModal'
 import { ObsVersionBadge } from '../ObsVersionBadge'
@@ -117,6 +119,70 @@ function formatShortcutTitle(shortcut: string[]) {
   return shortcut.join('+')
 }
 
+function scorePalettePluginMatch(plugin: PluginCatalogEntry, query: string) {
+  if (!query) {
+    return Number(Boolean(plugin.featured)) * 40 + Number(Boolean(plugin.verified)) * 20
+  }
+
+  const normalizedName = plugin.name.toLowerCase()
+  const normalizedTagline = plugin.tagline.toLowerCase()
+  const normalizedDescription = plugin.description.toLowerCase()
+  const normalizedCategory = plugin.category.toLowerCase()
+
+  if (normalizedName === query) {
+    return 1000
+  }
+
+  if (normalizedName.startsWith(query)) {
+    return 900
+  }
+
+  if (normalizedName.includes(query)) {
+    return 800
+  }
+
+  if (normalizedTagline.startsWith(query)) {
+    return 650
+  }
+
+  if (normalizedTagline.includes(query)) {
+    return 600
+  }
+
+  if (normalizedDescription.includes(query)) {
+    return 500
+  }
+
+  if (normalizedCategory.includes(query)) {
+    return 350
+  }
+
+  return -1
+}
+
+function getPalettePluginBadge(
+  installedPlugin: InstalledPluginRecord | undefined,
+  pluginState: ReturnType<typeof getCatalogPluginState>,
+) {
+  if (
+    installedPlugin?.status === 'manual-step' ||
+    installedPlugin?.status === 'missing-files' ||
+    installedPlugin?.verificationStatus === 'missing-files'
+  ) {
+    return 'Needs attention'
+  }
+
+  if (pluginState === 'update-available') {
+    return 'Update available'
+  }
+
+  if (pluginState === 'installed' || pluginState === 'installed-externally') {
+    return 'Installed'
+  }
+
+  return 'Available'
+}
+
 export function AppShell() {
   const location = useLocation()
   const navigate = useNavigate()
@@ -137,6 +203,7 @@ export function AppShell() {
   const retryLastInstall = useAppStore((state) => state.retryLastInstall)
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false)
   const [commandPaletteQuery, setCommandPaletteQuery] = useState('')
+  const [debouncedCommandPaletteQuery, setDebouncedCommandPaletteQuery] = useState('')
   const [recentSearches, setRecentSearches] = useState<string[]>(() => {
     if (typeof window === 'undefined') {
       return []
@@ -156,8 +223,9 @@ export function AppShell() {
     : undefined
   const showBackButton = location.pathname !== '/'
 
-  const installedByPluginId = new Map(
-    (bootstrap?.installedPlugins ?? []).map((plugin) => [plugin.pluginId, plugin]),
+  const installedByPluginId = useMemo(
+    () => new Map((bootstrap?.installedPlugins ?? []).map((plugin) => [plugin.pluginId, plugin])),
+    [bootstrap?.installedPlugins],
   )
   const updatesReady = (bootstrap?.plugins ?? []).filter((plugin) => {
     const installed = installedByPluginId.get(plugin.id)
@@ -181,6 +249,7 @@ export function AppShell() {
 
   const openCommandPalette = useCallback((initialQuery = searchQuery) => {
     setCommandPaletteQuery(initialQuery)
+    setDebouncedCommandPaletteQuery(initialQuery)
     setIsCommandPaletteOpen(true)
   }, [searchQuery])
 
@@ -199,30 +268,40 @@ export function AppShell() {
     window.localStorage.setItem(RECENT_SEARCHES_STORAGE_KEY, JSON.stringify(next))
   }, [recentSearches])
 
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedCommandPaletteQuery(commandPaletteQuery)
+    }, 180)
+
+    return () => window.clearTimeout(timeoutId)
+  }, [commandPaletteQuery])
+
   const palettePlugins = useMemo(() => {
-    const query = commandPaletteQuery.trim().toLowerCase()
+    const query = debouncedCommandPaletteQuery.trim().toLowerCase()
     const haystackEntries = bootstrap?.plugins ?? []
 
-    if (!query) {
-      return haystackEntries
-        .slice()
-        .sort((left, right) => {
-          const leftScore = Number(Boolean(left.featured)) + Number(Boolean(left.verified))
-          const rightScore = Number(Boolean(right.featured)) + Number(Boolean(right.verified))
-          return rightScore - leftScore || left.name.localeCompare(right.name)
-        })
-        .slice(0, 3)
-    }
-
     return haystackEntries
-      .filter((plugin) =>
-        [plugin.name, plugin.author, plugin.description, plugin.category]
-          .join(' ')
-          .toLowerCase()
-          .includes(query),
-      )
-      .slice(0, 6)
-  }, [bootstrap?.plugins, commandPaletteQuery])
+      .map((plugin) => {
+        const installedPlugin = installedByPluginId.get(plugin.id)
+        return {
+          plugin,
+          installedPlugin,
+          pluginState: getCatalogPluginState(plugin, installedPlugin),
+          score: scorePalettePluginMatch(plugin, query),
+        }
+      })
+      .filter((entry) => (!query ? true : entry.score >= 0))
+      .sort((left, right) => {
+        const installedRank =
+          Number(Boolean(right.installedPlugin)) - Number(Boolean(left.installedPlugin))
+        return (
+          right.score - left.score ||
+          installedRank ||
+          right.plugin.name.localeCompare(left.plugin.name)
+        )
+      })
+      .slice(0, query ? 8 : 5)
+  }, [bootstrap?.plugins, debouncedCommandPaletteQuery, installedByPluginId])
 
   const commandPaletteSections = useMemo<CommandPaletteSection[]>(() => {
     const query = commandPaletteQuery.trim()
@@ -308,12 +387,21 @@ export function AppShell() {
           },
         }))
 
-    const pluginItems = palettePlugins.map((plugin) => ({
+    const pluginItems = palettePlugins.map(({ plugin, installedPlugin, pluginState }) => ({
       id: `plugin-${plugin.id}`,
       title: plugin.name,
-      subtitle: `${plugin.author} • ${plugin.category}`,
-      icon: <Boxes className="size-4" />,
-      badge: plugin.verified ? 'Verified' : undefined,
+      subtitle: plugin.tagline || plugin.description || `${plugin.author} • ${plugin.category}`,
+      icon: plugin.iconUrl ? (
+        <img
+          alt=""
+          className="size-4 rounded object-cover"
+          loading="lazy"
+          src={plugin.iconUrl}
+        />
+      ) : (
+        <PluginGlyph className="size-4" iconKey={plugin.iconKey} />
+      ),
+      badge: getPalettePluginBadge(installedPlugin, pluginState),
       onSelect: () => {
         if (query) {
           rememberSearch(query)
@@ -322,15 +410,29 @@ export function AppShell() {
       },
     }))
 
+    const resultsSection: CommandPaletteSection = {
+      id: 'results',
+      title: query ? 'Results' : 'Popular plugins',
+      items:
+        query && pluginItems.length === 0
+          ? [
+              {
+                id: 'results-empty',
+                title: 'No matching plugins found',
+                subtitle: 'Try a broader plugin name or description, or use the catalog search action below.',
+                icon: <Search className="size-4" />,
+                disabled: true,
+                onSelect: () => undefined,
+              },
+            ]
+          : pluginItems,
+    }
+
     return [
+      resultsSection,
       { id: 'search', title: query ? 'Search' : 'Recent searches', items: searchItems },
       { id: 'navigation', title: 'Navigation', items: navigationItems },
       { id: 'commands', title: 'Commands', items: commandItems },
-      {
-        id: 'plugins',
-        title: query ? 'Matching plugins' : 'Popular plugins',
-        items: pluginItems,
-      },
     ].filter((section) => section.items.length > 0)
   }, [
     checkForAppUpdate,

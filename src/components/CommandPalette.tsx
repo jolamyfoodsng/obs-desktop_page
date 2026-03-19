@@ -46,6 +46,16 @@ export function CommandPalette({
       ),
     [sections],
   )
+  const firstEnabledIndex = useMemo(
+    () => flattenedItems.findIndex(({ item }) => !item.disabled),
+    [flattenedItems],
+  )
+  const activeItemIndex =
+    flattenedItems.length === 0
+      ? 0
+      : flattenedItems[activeIndex]?.item && !flattenedItems[activeIndex].item.disabled
+        ? activeIndex
+        : Math.max(firstEnabledIndex, 0)
 
   useEffect(() => {
     if (!open) {
@@ -68,7 +78,7 @@ export function CommandPalette({
         return
       }
 
-      let nextIndex = activeIndex
+      let nextIndex = activeItemIndex
       for (let attempts = 0; attempts < flattenedItems.length; attempts += 1) {
         nextIndex =
           (nextIndex + direction + flattenedItems.length) % flattenedItems.length
@@ -99,7 +109,7 @@ export function CommandPalette({
       }
 
       if (event.key === 'Enter') {
-        const activeItem = flattenedItems[activeIndex]?.item
+        const activeItem = flattenedItems[activeItemIndex]?.item
         if (!activeItem || activeItem.disabled) {
           return
         }
@@ -112,7 +122,7 @@ export function CommandPalette({
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [activeIndex, flattenedItems, onClose, open])
+  }, [activeItemIndex, flattenedItems, onClose, open])
 
   if (!open) {
     return null
@@ -164,7 +174,7 @@ export function CommandPalette({
                   <div className="mt-2 space-y-1">
                     {section.items.map((item) => {
                       itemIndex += 1
-                      const isActive = itemIndex === activeIndex
+                      const isActive = itemIndex === activeItemIndex
 
                       return (
                         <button

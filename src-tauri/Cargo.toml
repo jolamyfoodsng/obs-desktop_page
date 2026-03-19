@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "1.0.0"
+version = "1.0.1"
 default-run = "app"
 description = "OBS Plugin Installer desktop app built with Tauri"
 authors = ["OBS Plugin Installer contributors"]

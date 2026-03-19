@@ -138,11 +138,11 @@ function buildTrackedPluginRow(
   } else if (isExternalInstall) {
     statusTone = 'neutral'
     helperText =
-      'This plugin is present in your OBS folders, but this copy was not installed by OBS Plugin Installer.'
+      'This plugin was installed outside OBS Plugin Installer. Because it was not fully installed by the app, it cannot be removed automatically from here. To uninstall this plugin, use your system\'s app manager or the plugin\'s own uninstaller.'
   } else if (isInstallerInstall) {
     statusTone = 'neutral'
     helperText =
-      'This plugin was installed through a guided installer flow and the install completed successfully.'
+      'This plugin was installed using an external installer. OBS Plugin Installer helped start the installation, but the plugin was installed by its own installer. Because of that, it cannot be removed automatically from here. To uninstall this plugin, use your system\'s app manager or the plugin\'s own uninstaller.'
   }
 
   let deleteDisabledReason: string | null = null
@@ -348,15 +348,18 @@ export function InstalledPage() {
   function renderTrackedRow(row: TrackedPluginRow) {
     const sourcePage = getSourcePage(row.plugin)
     const canRetry = row.compatibility.canInstall
+    const manualUninstallTooltip =
+      'This plugin must be removed using your system or the plugin installer.'
     const canOpenManualFix =
       row.section === 'attention' &&
       (row.isScriptAttachPending ||
         (row.installedPlugin.status === 'manual-step' && row.isStandaloneTool))
     const primaryActionLabel = row.section === 'attention' ? 'Fix installation' : 'Reinstall'
     const secondaryActionLabel = row.section === 'attention' ? 'Retry' : null
+    const openPluginDetails = () => navigate(`/plugin/${row.plugin.id}`)
     const removeButton = (
       <Button
-        disabled={!row.canDelete || uninstallingPluginId === row.plugin.id}
+        disabled={uninstallingPluginId === row.plugin.id}
         size="sm"
         variant="ghost"
         onClick={() =>
@@ -371,19 +374,42 @@ export function InstalledPage() {
         Remove
       </Button>
     )
+    const manualUninstallButton = (
+      <Button
+        size="sm"
+        variant="ghost"
+        onClick={() => {
+          if (sourcePage) {
+            void openExternal(sourcePage)
+            return
+          }
+
+          void revealPath(row.installedPlugin.installLocation)
+        }}
+      >
+        <ExternalLink className="size-4" />
+        Uninstall manually
+      </Button>
+    )
 
     return (
       <article
-        className="rounded-[24px] border border-white/10 bg-black/20 p-5"
+        className="group relative cursor-pointer overflow-hidden rounded-[24px] border border-white/10 bg-black/20 transition-all hover:border-white/20 hover:bg-black/25"
         key={row.plugin.id}
       >
-        <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+        <button
+          aria-label={`Open ${row.plugin.name}`}
+          className="absolute inset-0 z-0 cursor-pointer"
+          onClick={openPluginDetails}
+          type="button"
+        />
+        <div className="relative z-10 flex flex-col gap-5 p-5 pointer-events-none xl:flex-row xl:items-start xl:justify-between">
           <div className="min-w-0 flex-1 space-y-4">
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-2">
                 <button
-                  className="text-left text-lg font-semibold text-white transition hover:text-primary"
-                  onClick={() => navigate(`/plugins/${row.plugin.id}`)}
+                  className="pointer-events-auto text-left text-lg font-semibold text-white transition hover:text-primary group-hover:text-primary"
+                  onClick={openPluginDetails}
                   type="button"
                 >
                   {row.plugin.name}
@@ -399,7 +425,8 @@ export function InstalledPage() {
             <div className="flex flex-wrap gap-2">
               {row.isScriptEntry ? <Badge tone="script">OBS Script</Badge> : null}
               {row.isStandaloneTool ? <Badge tone="neutral">Standalone Tool</Badge> : null}
-              {row.isExternalInstall ? <Badge tone="neutral">Detected in OBS</Badge> : null}
+              {row.isInstallerInstall ? <Badge tone="neutral">External installer</Badge> : null}
+              {row.isExternalInstall ? <Badge tone="neutral">Installed outside the app</Badge> : null}
               {row.installedPlugin.verificationStatus === 'verified' ? (
                 <Badge tone="success">Verified files</Badge>
               ) : null}
@@ -421,18 +448,22 @@ export function InstalledPage() {
             </div>
 
             {row.isScriptEntry && row.installedPlugin.downloadPath ? (
-              <CopyPathField
-                buttonClassName="h-7 w-7"
-                codeClassName="rounded-md px-2 py-1 text-[11px] leading-5"
-                value={row.installedPlugin.downloadPath}
-              />
+              <div className="pointer-events-auto">
+                <CopyPathField
+                  buttonClassName="h-7 w-7"
+                  codeClassName="rounded-md px-2 py-1 text-[11px] leading-5"
+                  value={row.installedPlugin.downloadPath}
+                />
+              </div>
             ) : null}
             {!row.isScriptEntry && row.resolvedEntryFiles.length ? (
-              <CopyPathField
-                buttonClassName="h-7 w-7"
-                codeClassName="rounded-md px-2 py-1 text-[11px] leading-5"
-                value={row.resolvedEntryFiles[0].absolutePath}
-              />
+              <div className="pointer-events-auto">
+                <CopyPathField
+                  buttonClassName="h-7 w-7"
+                  codeClassName="rounded-md px-2 py-1 text-[11px] leading-5"
+                  value={row.resolvedEntryFiles[0].absolutePath}
+                />
+              </div>
             ) : null}
             {developerMode ? (
               <p className="break-all text-[11px] leading-5 text-slate-500">
@@ -441,7 +472,7 @@ export function InstalledPage() {
             ) : null}
           </div>
 
-          <div className="flex flex-wrap items-start gap-2 xl:max-w-[320px] xl:justify-end">
+          <div className="pointer-events-auto flex flex-wrap items-start gap-2 xl:max-w-[320px] xl:justify-end">
             {sourcePage ? (
               <Button
                 size="sm"
@@ -504,7 +535,7 @@ export function InstalledPage() {
             {row.canDelete ? (
               removeButton
             ) : (
-              <span title={row.deleteDisabledReason ?? undefined}>{removeButton}</span>
+              <span title={manualUninstallTooltip}>{manualUninstallButton}</span>
             )}
           </div>
         </div>
@@ -539,17 +570,31 @@ export function InstalledPage() {
 
     return (
       <article
-        className="rounded-[24px] border border-white/10 bg-black/20 p-5"
+        className={`group relative overflow-hidden rounded-[24px] border border-white/10 bg-black/20 transition-all ${
+          plugin ? 'cursor-pointer hover:border-white/20 hover:bg-black/25' : ''
+        }`}
         key={`${row.pluginId}-${row.removedAt}`}
       >
-        <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+        {plugin ? (
+          <button
+            aria-label={`Open ${row.pluginName}`}
+            className="absolute inset-0 z-0 cursor-pointer"
+            onClick={() => navigate(`/plugin/${plugin.id}`)}
+            type="button"
+          />
+        ) : null}
+        <div
+          className={`relative z-10 flex flex-col gap-5 p-5 ${
+            plugin ? 'pointer-events-none xl:flex-row xl:items-start xl:justify-between' : 'xl:flex-row xl:items-start xl:justify-between'
+          }`}
+        >
           <div className="min-w-0 flex-1 space-y-4">
             <div className="space-y-2">
               <div className="flex flex-wrap items-center gap-2">
                 {plugin ? (
                   <button
-                    className="text-left text-lg font-semibold text-white transition hover:text-primary"
-                    onClick={() => navigate(`/plugins/${plugin.id}`)}
+                    className="pointer-events-auto text-left text-lg font-semibold text-white transition hover:text-primary group-hover:text-primary"
+                    onClick={() => navigate(`/plugin/${plugin.id}`)}
                     type="button"
                   >
                     {row.pluginName}
@@ -575,7 +620,7 @@ export function InstalledPage() {
             ) : null}
           </div>
 
-          <div className="flex flex-wrap items-start gap-2 xl:max-w-[280px] xl:justify-end">
+          <div className={`${plugin ? 'pointer-events-auto ' : ''}flex flex-wrap items-start gap-2 xl:max-w-[280px] xl:justify-end`}>
             {sourcePage ? (
               <Button
                 size="sm"
