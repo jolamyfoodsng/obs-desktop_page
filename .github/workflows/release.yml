@@ -37,13 +37,13 @@ jobs:
             label: Linux x64
             platform: linux
             artifact_suffix: linux-x64
-            bundles: appimage,deb
+            bundles: appimage,deb,rpm
             default_update_bundle: appimage
           - os: ubuntu-24.04-arm
             label: Linux ARM64
             platform: linux
             artifact_suffix: linux-arm64
-            bundles: deb
+            bundles: deb,rpm
             default_update_bundle: deb
           - os: macos-15-intel
             label: macOS Intel
@@ -74,6 +74,7 @@ jobs:
             file \
             libayatana-appindicator3-dev \
             librsvg2-dev \
+            rpm \
             libssl-dev \
             libwebkit2gtk-4.1-dev \
             libxdo-dev \
@@ -142,6 +143,7 @@ jobs:
             src-tauri/target/release/bundle/**/*.msi
             src-tauri/target/release/bundle/**/*.AppImage
             src-tauri/target/release/bundle/**/*.deb
+            src-tauri/target/release/bundle/**/*.rpm
             src-tauri/target/release/bundle/**/*.app.tar.gz
             src-tauri/target/release/bundle/**/*.dmg
             src-tauri/target/release/bundle/**/*.sig
@@ -159,6 +161,7 @@ jobs:
             src-tauri/target/release/bundle/**/*.msi
             src-tauri/target/release/bundle/**/*.AppImage
             src-tauri/target/release/bundle/**/*.deb
+            src-tauri/target/release/bundle/**/*.rpm
             src-tauri/target/release/bundle/**/*.app.tar.gz
             src-tauri/target/release/bundle/**/*.dmg
             src-tauri/target/release/bundle/**/*.sig
@@ -201,6 +204,7 @@ jobs:
             -name '*.msi' -o \
             -name '*.AppImage' -o \
             -name '*.deb' -o \
+            -name '*.rpm' -o \
             -name '*.app.tar.gz' -o \
             -name '*.dmg' -o \
             -name '*.sig' \
@@ -215,7 +219,7 @@ jobs:
           printf ' - %s\n' "${release_files[@]}"
 
       - name: Verify merged release artifacts
-        run: node scripts/verify_release_assets.mjs --root release-artifacts --bundles nsis,msi,appimage,deb,app,dmg
+        run: node scripts/verify_release_assets.mjs --root release-artifacts --bundles nsis,msi,appimage,deb,rpm,app,dmg
 
       - name: Publish prerelease
         uses: softprops/action-gh-release@v2
@@ -239,6 +243,7 @@ jobs:
             release-artifacts/**/*.msi
             release-artifacts/**/*.AppImage
             release-artifacts/**/*.deb
+            release-artifacts/**/*.rpm
             release-artifacts/**/*.app.tar.gz
             release-artifacts/**/*.dmg
             release-artifacts/**/*.sig

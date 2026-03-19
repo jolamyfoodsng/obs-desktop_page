@@ -80,6 +80,12 @@ npm run build:release
 
 This runs a full Tauri release build and produces distributable bundles under `src-tauri/target/release/bundle/`.
 
+For Linux releases, the project is configured to ship native packages instead of relying on AppImage alone:
+
+- Fedora and other RPM-based distributions should use the generated `.rpm` package.
+- Debian and Ubuntu can continue using the generated `.deb` package.
+- `.AppImage` remains available as a fallback when a native package is not appropriate.
+
 ## Feedback / requests backend
 
 The desktop app now includes an in-app feedback screen backed by a lightweight Vercel Function.
@@ -254,6 +260,7 @@ For every push and version-tag push, GitHub Actions:
 
 - runs on GitHub-hosted `windows-latest`, `ubuntu-latest`, and `macos-latest` runners
 - installs Node.js, Rust, and the required Tauri build dependencies
+- installs Linux packaging prerequisites on Ubuntu runners, including RPM tooling and the GTK/WebKit libraries Tauri needs to bundle Linux apps
 - installs npm dependencies with `npm ci`
 - verifies that the version metadata matches across:
   - `package.json`
@@ -267,6 +274,12 @@ For every push and version-tag push, GitHub Actions:
 - uploads installer artifacts and `.sig` files to the workflow run on normal branch pushes
 - creates a new release entry after successful `main` builds using the current app version and GitHub Actions run number
 - uploads both installer artifacts and `.sig` files to a GitHub Release automatically when the pushed ref is a version tag like `v0.2.0`
+
+Linux release outputs now include:
+
+- `.rpm` for Fedora and other RPM-based distributions
+- `.AppImage` as a portable fallback on x64 Linux builds
+- `.deb` for Debian and Ubuntu users
 
 ### Simple version bump flow
 
@@ -358,9 +371,9 @@ The update server expects the GitHub Release to contain signed installer assets 
   - NSIS `*.exe` plus matching `*.exe.sig`
   - MSI `*.msi` plus matching `*.msi.sig`
 - Linux:
-  - `*.AppImage`
-  - `*.deb`
-  - `*.rpm` if you add RPM builds later
+  - `*.rpm` for native installs on Fedora and other RPM-based distributions
+  - `*.AppImage` as the portable fallback
+  - `*.deb` for Debian and Ubuntu
   - matching `*.sig`
 - macOS scaffold:
   - `*.app.tar.gz`

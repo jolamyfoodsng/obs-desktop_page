@@ -64,6 +64,12 @@ const BUNDLE_RULES = {
     matcher: (filePath) => filePath.toLowerCase().endsWith('.deb'),
     requiresSignature: false,
   },
+  rpm: {
+    folderName: 'rpm',
+    label: 'Linux RPM package',
+    matcher: (filePath) => filePath.toLowerCase().endsWith('.rpm'),
+    requiresSignature: true,
+  },
   app: {
     folderName: 'macos',
     label: 'macOS updater archive',
