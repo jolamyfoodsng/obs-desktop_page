@@ -129,6 +129,7 @@ test('Linux ARM64 chooses the arm64 DEB when both architectures exist', () => {
 test('classification stays stable for inconsistent filenames', () => {
   const macUpdate = classifyReleaseAsset(createAsset('DesktopBuild.app.tar.gz'), '0.28.0')
   const windowsInstaller = classifyReleaseAsset(createAsset('OBS Plugin Installer Setup.exe'), '0.28.0')
+  const versionedAppImage = classifyReleaseAsset(createAsset('OBS.Plugin.Installer.v0.16.0.AppImage'), '0.16.0')
 
   assert.deepEqual(
     {
@@ -136,14 +137,14 @@ test('classification stays stable for inconsistent filenames', () => {
       arch: macUpdate.arch,
       kind: macUpdate.kind,
       format: macUpdate.format,
-      versionMatchesRelease: macUpdate.versionMatchesRelease,
+      versionState: macUpdate.versionState,
     },
     {
       os: 'macos',
       arch: 'universal',
       kind: 'updater_bundle',
       format: 'app_tar_gz',
-      versionMatchesRelease: true,
+      versionState: 'absent',
     },
   )
 
@@ -161,6 +162,9 @@ test('classification stays stable for inconsistent filenames', () => {
       format: 'exe',
     },
   )
+
+  assert.equal(versionedAppImage.canonicalName, 'obs.plugin.installer.v0.16.0.appimage')
+  assert.equal(versionedAppImage.versionState, 'match')
 })
 
 test('signatures must match the exact selected updater asset', () => {
@@ -177,8 +181,108 @@ test('signatures must match the exact selected updater asset', () => {
   const manual = resolveManualFallbackForTarget(catalog, target)
 
   assert.equal(selected.kind, 'missing')
-  assert.match(selected.message ?? '', /signature is missing/i)
+  assert.match(selected.message ?? '', /OBS\.Plugin\.Installer\.app\.tar\.gz/i)
+  assert.match(selected.message ?? '', /OBS\.Plugin\.Installer\.app\.tar\.gz\.sig/i)
+  assert.match(selected.message ?? '', /manual installer is available/i)
   assert.equal(manual?.asset.name, 'OBS.Plugin.Installer_0.28.0_aarch64.dmg')
+})
+
+test('stale filename versions do not block manual fallback selection', () => {
+  const catalog = buildReleaseAssetCatalog(
+    createRelease('v0.30.0', [
+      'OBS.Plugin.Installer.app.tar.gz',
+      'OBS.Plugin.Installer_0.29.0_aarch64.dmg',
+      'OBS.Plugin.Installer_0.29.0_x64.dmg',
+    ]),
+  )
+  const target = getTarget('darwin', 'arm64', 'app')
+
+  const selected = resolveSelectionForTarget(catalog, target)
+  const manual = resolveManualFallbackForTarget(catalog, target)
+
+  assert.equal(selected.kind, 'missing')
+  assert.match(selected.message ?? '', /OBS\.Plugin\.Installer\.app\.tar\.gz/i)
+  assert.match(selected.message ?? '', /OBS\.Plugin\.Installer\.app\.tar\.gz\.sig/i)
+  assert.match(selected.message ?? '', /manual installer is available/i)
+  assert.equal(manual?.asset.name, 'OBS.Plugin.Installer_0.29.0_aarch64.dmg')
+  assert.match(manual?.reason ?? '', /filename version differs from release tag/i)
+})
+
+test('platform selection tolerates realistic filename variations across macOS, Windows, and Linux', () => {
+  const catalog = buildReleaseAssetCatalog(
+    createRelease('v0.16.0', [
+      'OBS.Plugin.Installer.app.tar.gz',
+      'OBS.Plugin.Installer.app.tar.gz.sig',
+      'OBS Plugin Installer_0.16.0_x64-setup.exe',
+      'OBS Plugin Installer_0.16.0_x64-setup.exe.sig',
+      'OBS.Plugin.Installer.0.16.0.exe',
+      'OBS.Plugin.Installer.0.16.0.exe.sig',
+      'OBS Plugin Installer_0.16.0_amd64.deb',
+      'OBS Plugin Installer_0.16.0_amd64.deb.sig',
+      'OBS.Plugin.Installer.v0.16.0.AppImage',
+      'OBS.Plugin.Installer.v0.16.0.AppImage.sig',
+    ]),
+  )
+
+  const macTarget = getTarget('darwin', 'arm64', 'app')
+  const windowsTarget = getTarget('windows', 'x64', 'nsis')
+  const linuxDebTarget = getTarget('linux', 'amd64', 'deb')
+  const linuxAppImageTarget = getTarget('linux', 'x86_64', 'appimage')
+
+  const macSelected = resolveSelectionForTarget(catalog, macTarget)
+  const windowsSelected = resolveSelectionForTarget(catalog, windowsTarget)
+  const linuxDebSelected = resolveSelectionForTarget(catalog, linuxDebTarget)
+  const linuxAppImageSelected = resolveSelectionForTarget(catalog, linuxAppImageTarget)
+
+  assert.equal(macSelected.kind, 'selected')
+  assert.equal(macSelected.candidate?.asset.name, 'OBS.Plugin.Installer.app.tar.gz')
+  assert.equal(macSelected.candidate?.signatureAsset.name, 'OBS.Plugin.Installer.app.tar.gz.sig')
+
+  assert.equal(windowsSelected.kind, 'selected')
+  assert.equal(windowsSelected.candidate?.asset.name, 'OBS Plugin Installer_0.16.0_x64-setup.exe')
+  assert.equal(windowsSelected.candidate?.signatureAsset.name, 'OBS Plugin Installer_0.16.0_x64-setup.exe.sig')
+
+  assert.equal(linuxDebSelected.kind, 'selected')
+  assert.equal(linuxDebSelected.candidate?.asset.name, 'OBS Plugin Installer_0.16.0_amd64.deb')
+
+  assert.equal(linuxAppImageSelected.kind, 'selected')
+  assert.equal(linuxAppImageSelected.candidate?.asset.name, 'OBS.Plugin.Installer.v0.16.0.AppImage')
+})
+
+test('duplicate upload suffixes do not break updater bundle signature pairing', () => {
+  const catalog = buildReleaseAssetCatalog(
+    createRelease('v0.30.0', [
+      'OBS.Plugin.Installer.app.1.tar.gz',
+      'OBS.Plugin.Installer.app.tar.gz',
+      'OBS.Plugin.Installer.app.tar.gz.1.sig',
+    ]),
+  )
+  const target = getTarget('darwin', 'arm64', 'app')
+
+  const selected = resolveSelectionForTarget(catalog, target)
+
+  assert.equal(selected.kind, 'selected')
+  assert.equal(selected.candidate?.asset.name, 'OBS.Plugin.Installer.app.tar.gz')
+  assert.equal(selected.candidate?.signatureAsset.name, 'OBS.Plugin.Installer.app.tar.gz.1.sig')
+})
+
+test('equally valid update candidates are reported as ambiguous instead of chosen arbitrarily', () => {
+  const catalog = buildReleaseAssetCatalog(
+    createRelease('v0.16.0', [
+      'A.exe',
+      'A.exe.sig',
+      'B.exe',
+      'B.exe.sig',
+    ]),
+  )
+  const target = getTarget('windows', 'x64', 'nsis')
+
+  const selected = resolveSelectionForTarget(catalog, target)
+
+  assert.equal(selected.kind, 'ambiguous')
+  assert.match(selected.message ?? '', /multiple compatible windows executable updater/i)
+  assert.match(selected.message ?? '', /A\.exe/i)
+  assert.match(selected.message ?? '', /B\.exe/i)
 })
 
 test('manual-only releases produce a precise error and still expose fallback installers', () => {

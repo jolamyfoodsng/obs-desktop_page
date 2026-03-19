@@ -178,6 +178,8 @@ const RELEASE_ARCH_TOKENS = {
   universal: ['universal', 'universal2'],
 } as const
 
+const DUPLICATE_SUFFIX_EXTENSIONS = ['.app.tar.gz', '.tar.gz', '.tgz', '.appimage', '.deb', '.rpm', '.dmg', '.exe', '.msi', '.zip', '.sig']
+
 type SupportedTarget = (typeof SUPPORTED_TARGETS)[number]
 
 export type UpdateStatus =
@@ -242,6 +244,7 @@ export interface SelectionResult {
 export type ReleaseAssetOs = 'macos' | 'windows' | 'linux' | 'unknown'
 export type ReleaseAssetArch = 'x64' | 'arm64' | 'universal' | 'unknown'
 export type ReleaseAssetKind = 'updater_bundle' | 'installer' | 'signature' | 'archive' | 'source'
+export type ReleaseAssetVersionState = 'match' | 'mismatch' | 'absent'
 export type ReleaseAssetFormat =
   | 'dmg'
   | 'app_tar_gz'
@@ -257,19 +260,20 @@ export type ReleaseAssetFormat =
 
 export interface ClassifiedReleaseAsset {
   asset: GitHubReleaseAsset
+  canonicalName: string
   os: ReleaseAssetOs
   arch: ReleaseAssetArch
   kind: ReleaseAssetKind
   format: ReleaseAssetFormat
   version: string | null
-  versionMatchesRelease: boolean
+  versionState: ReleaseAssetVersionState
   signatureTargetName?: string
 }
 
 export interface ReleaseAssetCatalog {
   releaseVersion: string | null
   assets: ClassifiedReleaseAsset[]
-  signatureAssetsByTargetName: Map<string, GitHubReleaseAsset>
+  signatureAssetsByTargetName: Map<string, GitHubReleaseAsset[]>
 }
 
 export interface UpdateMetadataPayload {
@@ -564,6 +568,33 @@ function normalizeBundleType(value: string | undefined | null) {
   return BUNDLE_TYPE_ALIASES[value.trim().toLowerCase() as keyof typeof BUNDLE_TYPE_ALIASES] ?? null
 }
 
+function canonicalizeReleaseAssetName(fileName: string) {
+  for (const extension of DUPLICATE_SUFFIX_EXTENSIONS) {
+    const lower = fileName.toLowerCase()
+    if (!lower.endsWith(extension)) {
+      continue
+    }
+
+    const stem = fileName.slice(0, fileName.length - extension.length)
+    const duplicateSuffix = stem.match(/(?:\.\d+| \(\d+\))$/)
+    if (!duplicateSuffix) {
+      return fileName
+    }
+
+    // Preserve genuine semantic version segments like v0.16.0.exe.
+    if (
+      duplicateSuffix[0].startsWith('.') &&
+      /(?:^|[^0-9])v?\d+\.\d+$/.test(stem.slice(0, -duplicateSuffix[0].length))
+    ) {
+      return fileName
+    }
+
+    return `${stem.slice(0, -duplicateSuffix[0].length)}${fileName.slice(fileName.length - extension.length)}`
+  }
+
+  return fileName
+}
+
 export function resolveSupportedTarget(
   target: string | undefined | null,
   arch: string | undefined | null,
@@ -695,21 +726,25 @@ export function classifyReleaseAsset(
   asset: GitHubReleaseAsset,
   releaseVersion?: string | null,
 ): ClassifiedReleaseAsset {
-  const format = formatFromFileName(asset.name)
-  const kind = kindFromFormat(format, asset.name)
-  const os = kind === 'signature' ? 'unknown' : osFromFormat(format, asset.name.toLowerCase())
-  const arch = kind === 'signature' ? 'unknown' : archFromFormatAndTokens(format, asset.name.toLowerCase(), os)
-  const version = normalizeVersion(asset.name)
+  const canonicalName = canonicalizeReleaseAssetName(asset.name)
+  const normalizedCanonicalName = canonicalName.toLowerCase()
+  const format = formatFromFileName(canonicalName)
+  const kind = kindFromFormat(format, canonicalName)
+  const os = kind === 'signature' ? 'unknown' : osFromFormat(format, normalizedCanonicalName)
+  const arch = kind === 'signature' ? 'unknown' : archFromFormatAndTokens(format, normalizedCanonicalName, os)
+  const version = normalizeVersion(canonicalName)
 
   return {
     asset,
+    canonicalName: normalizedCanonicalName,
     os,
     arch,
     kind,
     format,
     version,
-    versionMatchesRelease: !releaseVersion || !version || version === releaseVersion,
-    signatureTargetName: format === 'sig' ? asset.name.slice(0, -4).toLowerCase() : undefined,
+    versionState: !version ? 'absent' : !releaseVersion || version === releaseVersion ? 'match' : 'mismatch',
+    signatureTargetName:
+      format === 'sig' ? canonicalizeReleaseAssetName(canonicalName.slice(0, -4)).toLowerCase() : undefined,
   }
 }
 
@@ -718,11 +753,16 @@ export function buildReleaseAssetCatalog(
 ): ReleaseAssetCatalog {
   const releaseVersion = normalizeVersion(release.tag_name) ?? normalizeVersion(release.name)
   const assets = release.assets.map((asset) => classifyReleaseAsset(asset, releaseVersion))
-  const signatureAssetsByTargetName = new Map(
-    assets
-      .filter((asset): asset is ClassifiedReleaseAsset & { signatureTargetName: string } => Boolean(asset.signatureTargetName))
-      .map((asset) => [asset.signatureTargetName, asset.asset] as const),
-  )
+  const signatureAssetsByTargetName = assets.reduce<Map<string, GitHubReleaseAsset[]>>((accumulator, asset) => {
+    if (!asset.signatureTargetName) {
+      return accumulator
+    }
+
+    const existing = accumulator.get(asset.signatureTargetName) ?? []
+    existing.push(asset.asset)
+    accumulator.set(asset.signatureTargetName, existing)
+    return accumulator
+  }, new Map())
 
   return {
     releaseVersion,
@@ -755,11 +795,68 @@ function isInstallableAsset(asset: ClassifiedReleaseAsset) {
   return asset.kind === 'updater_bundle' || asset.kind === 'installer'
 }
 
-function findExactSignature(
+function findMatchingSignature(
   catalog: ReleaseAssetCatalog,
   asset: ClassifiedReleaseAsset,
 ) {
-  return catalog.signatureAssetsByTargetName.get(asset.asset.name.toLowerCase())
+  const matches = catalog.signatureAssetsByTargetName.get(asset.canonicalName) ?? []
+  if (matches.length === 0) {
+    return null
+  }
+
+  const exactSignatureName = expectedSignatureName(asset).toLowerCase()
+  return [...matches].sort((left, right) => {
+    const leftExact = left.name.toLowerCase() === exactSignatureName ? 1 : 0
+    const rightExact = right.name.toLowerCase() === exactSignatureName ? 1 : 0
+    if (leftExact !== rightExact) {
+      return rightExact - leftExact
+    }
+
+    const leftCanonical = canonicalizeReleaseAssetName(left.name).length
+    const rightCanonical = canonicalizeReleaseAssetName(right.name).length
+    if (leftCanonical !== rightCanonical) {
+      return leftCanonical - rightCanonical
+    }
+
+    return left.name.localeCompare(right.name)
+  })[0]
+}
+
+function expectedSignatureName(asset: ClassifiedReleaseAsset | GitHubReleaseAsset) {
+  return `${'asset' in asset ? asset.asset.name : asset.name}.sig`
+}
+
+function hasCanonicalizedName(asset: ClassifiedReleaseAsset) {
+  return asset.canonicalName === asset.asset.name.toLowerCase()
+}
+
+function serializeAssetForLog(catalog: ReleaseAssetCatalog, asset: ClassifiedReleaseAsset) {
+  return {
+    name: asset.asset.name,
+    canonicalName: asset.canonicalName,
+    os: asset.os,
+    arch: asset.arch,
+    kind: asset.kind,
+    format: asset.format,
+    version: asset.version,
+    versionState: asset.versionState,
+    hasSignature: isInstallableAsset(asset) ? Boolean(findMatchingSignature(catalog, asset)) : undefined,
+    expectedSignature: isInstallableAsset(asset) ? expectedSignatureName(asset) : undefined,
+  }
+}
+
+function logTargetAssetPool(
+  stage: string,
+  catalog: ReleaseAssetCatalog,
+  target: SupportedTarget,
+  assets: ClassifiedReleaseAsset[],
+) {
+  console.info(`[update-api] ${stage}`, {
+    target: target.key,
+    targetLabel: target.label,
+    bundleType: target.bundleType,
+    assets: assets.map((asset) => serializeAssetForLog(catalog, asset)),
+  })
 }
 
 function manualFormatPriority(target: SupportedTarget): ReleaseAssetFormat[] {
@@ -790,8 +887,38 @@ function compatibleTargetAssets(catalog: ReleaseAssetCatalog, target: SupportedT
   return catalog.assets.filter(
     (asset) =>
       isInstallableAsset(asset) &&
-      asset.versionMatchesRelease &&
       asset.os === target.target,
+  )
+}
+
+function versionPriorityScore(asset: ClassifiedReleaseAsset) {
+  if (asset.versionState === 'match') {
+    return 2
+  }
+  if (asset.versionState === 'absent') {
+    return 1
+  }
+  return 0
+}
+
+function updateCandidateScore(asset: ClassifiedReleaseAsset, target: SupportedTarget) {
+  return (
+    archCompatibilityScore(asset.arch, target) * 100 +
+    versionPriorityScore(asset) * 10 +
+    (hasCanonicalizedName(asset) ? 1 : 0)
+  )
+}
+
+function manualCandidateScore(
+  asset: ClassifiedReleaseAsset,
+  target: SupportedTarget,
+  formatPriority: ReleaseAssetFormat[],
+) {
+  return (
+    (formatPriority.length - formatPriority.indexOf(asset.format)) * 100 +
+    archCompatibilityScore(asset.arch, target) * 10 +
+    versionPriorityScore(asset) +
+    (hasCanonicalizedName(asset) ? 1 : 0)
   )
 }
 
@@ -803,7 +930,10 @@ function buildUpdateSelectionReason(target: SupportedTarget, asset: ClassifiedRe
         ? 'universal'
         : asset.arch
 
-  return `selected signed ${FORMAT_LABELS[asset.format]} for ${target.label} (${archNote})`
+  const versionNote =
+    asset.versionState === 'mismatch' ? '; filename version differs from release tag' : ''
+
+  return `selected signed ${FORMAT_LABELS[asset.format]} for ${target.label} (${archNote}${versionNote})`
 }
 
 function buildManualFallbackReason(target: SupportedTarget, asset: ClassifiedReleaseAsset) {
@@ -814,7 +944,10 @@ function buildManualFallbackReason(target: SupportedTarget, asset: ClassifiedRel
         ? 'universal'
         : asset.arch
 
-  return `manual fallback via ${FORMAT_LABELS[asset.format]} for ${target.label} (${archNote})`
+  const versionNote =
+    asset.versionState === 'mismatch' ? '; filename version differs from release tag' : ''
+
+  return `manual fallback via ${FORMAT_LABELS[asset.format]} for ${target.label} (${archNote}${versionNote})`
 }
 
 function buildMissingSelectionMessage(
@@ -853,8 +986,24 @@ function buildMissingSelectionMessage(
     return `Compatible ${target.target} updater assets were found, but only for the wrong architecture.`
   }
 
-  if (matchingFormatCompatibleArch.some((asset) => !findExactSignature(catalog, asset))) {
-    return `A compatible ${updateRule.label} exists for ${target.label}, but its signature is missing.`
+  const missingSignatureCandidates = matchingFormatCompatibleArch
+    .filter((asset) => !findMatchingSignature(catalog, asset))
+    .sort(
+      (left, right) =>
+        updateCandidateScore(right, target) - updateCandidateScore(left, target) ||
+        left.asset.name.localeCompare(right.asset.name),
+    )
+
+  if (missingSignatureCandidates.length > 0) {
+    const candidate = missingSignatureCandidates[0]
+    const signatureName = expectedSignatureName(candidate)
+    const ambiguityNote =
+      missingSignatureCandidates.length > 1 ? ' Multiple compatible candidates were found in the release.' : ''
+
+    if (manualCandidate) {
+      return `Matched ${FORMAT_LABELS[candidate.format]} ${candidate.asset.name} for ${target.label}, but expected signature ${signatureName} was not found. A manual installer is available instead.${ambiguityNote}`
+    }
+    return `Matched ${FORMAT_LABELS[candidate.format]} ${candidate.asset.name} for ${target.label}, but expected signature ${signatureName} was not found.${ambiguityNote}`
   }
 
   if (manualCandidate) {
@@ -870,14 +1019,19 @@ export function resolveSelectionForTarget(
 ): SelectionResult {
   const installableAssets = catalog.assets.filter(isInstallableAsset)
   const updateRule = UPDATE_SELECTION_RULES[target.bundleType]
-  const candidates = compatibleTargetAssets(catalog, target)
+  const matchingOsAssets = compatibleTargetAssets(catalog, target)
+  const matchingFormatAssets = matchingOsAssets.filter((asset) => asset.format === updateRule.format)
+  logTargetAssetPool('update assets matched for target', catalog, target, matchingFormatAssets)
+
+  const candidates = matchingFormatAssets
     .filter((asset) => asset.format === updateRule.format)
     .map((asset) => {
-      const signatureAsset = findExactSignature(catalog, asset)
+      const signatureAsset = findMatchingSignature(catalog, asset)
       if (!signatureAsset) {
         console.info('[update-api] asset rejected', {
           target: target.key,
           asset: asset.asset.name,
+          expectedSignature: expectedSignatureName(asset),
           reason: 'missing updater signature',
         })
         return null
@@ -896,7 +1050,7 @@ export function resolveSelectionForTarget(
       return {
         asset: asset.asset,
         signatureAsset,
-        score: archScore * 100 + (asset.version ? 10 : 0),
+        score: updateCandidateScore(asset, target),
         reason: buildUpdateSelectionReason(target, asset),
       }
     })
@@ -917,9 +1071,29 @@ export function resolveSelectionForTarget(
     }
   }
 
+  const topCandidates = candidates.filter((candidate) => candidate.score === candidates[0].score)
+  if (topCandidates.length > 1) {
+    console.warn('[update-api] ambiguous update candidates', {
+      target: target.key,
+      candidates: topCandidates.map((candidate) => ({
+        asset: candidate.asset.name,
+        signature: candidate.signatureAsset.name,
+        score: candidate.score,
+        reason: candidate.reason,
+      })),
+    })
+    return {
+      kind: 'ambiguous',
+      message: `Multiple compatible ${updateRule.label}s were found for ${target.label}: ${topCandidates
+        .map((candidate) => candidate.asset.name)
+        .join(', ')}.`,
+    }
+  }
+
   console.info('[update-api] asset selected', {
     target: target.key,
     asset: candidates[0].asset.name,
+    signature: candidates[0].signatureAsset.name,
     reason: candidates[0].reason,
   })
 
@@ -934,21 +1108,27 @@ export function resolveManualFallbackForTarget(
   target: SupportedTarget,
 ): ManualFallbackCandidate | null {
   const formatPriority = manualFormatPriority(target)
-  const candidates = compatibleTargetAssets(catalog, target)
+  const matchingOsAssets = compatibleTargetAssets(catalog, target)
+  const matchingInstallers = matchingOsAssets
     .filter((asset) => asset.kind === 'installer')
     .filter((asset) => formatPriority.includes(asset.format))
+  logTargetAssetPool('manual fallback assets matched for target', catalog, target, matchingInstallers)
+
+  const candidates = matchingInstallers
     .map((asset) => {
       const archScore = archCompatibilityScore(asset.arch, target)
       if (archScore < 0) {
+        console.info('[update-api] manual fallback rejected', {
+          target: target.key,
+          asset: asset.asset.name,
+          reason: `wrong architecture for ${target.label}`,
+        })
         return null
       }
 
       return {
         asset: asset.asset,
-        score:
-          (formatPriority.length - formatPriority.indexOf(asset.format)) * 100 +
-          archScore * 10 +
-          (asset.version ? 1 : 0),
+        score: manualCandidateScore(asset, target, formatPriority),
         reason: buildManualFallbackReason(target, asset),
       }
     })
@@ -958,6 +1138,24 @@ export function resolveManualFallbackForTarget(
   if (candidates.length === 0) {
     return null
   }
+
+  const topCandidates = candidates.filter((candidate) => candidate.score === candidates[0].score)
+  if (topCandidates.length > 1) {
+    console.warn('[update-api] multiple manual fallback candidates', {
+      target: target.key,
+      candidates: topCandidates.map((candidate) => ({
+        asset: candidate.asset.name,
+        score: candidate.score,
+        reason: candidate.reason,
+      })),
+    })
+  }
+
+  console.info('[update-api] manual fallback selected', {
+    target: target.key,
+    asset: candidates[0].asset.name,
+    reason: candidates[0].reason,
+  })
 
   return candidates[0]
 }
@@ -1041,6 +1239,11 @@ export async function resolveUpdateCatalog(
   })
 
   const catalog = buildReleaseAssetCatalog(release)
+  console.info('[update-api] asset catalog classified', {
+    tag: release.tag_name,
+    releaseVersion: catalog.releaseVersion,
+    assets: catalog.assets.map((asset) => serializeAssetForLog(catalog, asset)),
+  })
 
   const selectionResults = new Map(
     SUPPORTED_TARGETS.map((target) => [target.key, resolveSelectionForTarget(catalog, target)] as const),
