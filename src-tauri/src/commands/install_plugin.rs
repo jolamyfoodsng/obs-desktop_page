@@ -1320,7 +1320,7 @@ fn resolve_resource_download_recursive(
     }
 
     Err(AppError::message(format!(
-        "OBS Plugin Installer does not support the downloaded format for {} yet.",
+        "Plugin Installer for OBS does not support the downloaded format for {} yet.",
         filename
     )))
 }
@@ -1342,7 +1342,7 @@ fn resolve_resource_download(
 
 fn ensure_download_directory(app: &AppHandle) -> Result<PathBuf, AppError> {
     let downloads_dir = app.path().download_dir()?;
-    let target_dir = downloads_dir.join("OBS Plugin Installer");
+    let target_dir = downloads_dir.join("Plugin Installer for OBS");
     fs::create_dir_all(&target_dir)?;
     Ok(target_dir)
 }
@@ -1755,7 +1755,7 @@ fn build_rollback_message(base: &str, issues: &[String]) -> String {
         format!("{base} Changes from this run were rolled back.")
     } else {
         format!(
-            "{base} OBS Plugin Installer attempted to roll back the changes from this run, but some items still need manual attention: {}",
+            "{base} Plugin Installer for OBS attempted to roll back the changes from this run, but some items still need manual attention: {}",
             issues.join(" | ")
         )
     }
@@ -2031,7 +2031,7 @@ fn external_install_guidance(
     match file_type {
         Some(PluginPackageFileType::Exe) | Some(PluginPackageFileType::Msi) => (
             "Windows installer",
-            "The Windows installer is running outside OBS Plugin Installer. Complete any admin, UAC, or PowerShell prompts there, then return to the app.",
+            "The Windows installer is running outside Plugin Installer for OBS. Complete any admin, UAC, or PowerShell prompts there, then return to the app.",
             false,
         ),
         Some(PluginPackageFileType::Pkg) | Some(PluginPackageFileType::Dmg) => (
@@ -3650,7 +3650,7 @@ pub fn cancel_plugin_install(
     Ok(CancelInstallResponse {
         canceled,
         message: if canceled {
-            "Cancellation requested. OBS Plugin Installer will stop this install safely."
+            "Cancellation requested. Plugin Installer for OBS will stop this install safely."
                 .to_string()
         } else {
             "No active install was found for that plugin.".to_string()

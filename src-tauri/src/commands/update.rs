@@ -9,8 +9,8 @@ use reqwest::blocking::Client;
 use reqwest::Url;
 use semver::Version;
 use serde::Deserialize;
-use tauri::{AppHandle, Emitter, Manager};
 use tar::Archive;
+use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_updater::{extract_path_from_executable, Update, UpdaterExt};
 
 use crate::commands::store::load_state;
@@ -88,9 +88,12 @@ fn runtime_or_build_var(name: &str, build_value: Option<&str>) -> Option<String>
 }
 
 fn update_base_url() -> Option<String> {
-    runtime_or_build_var("TAURI_UPDATE_BASE_URL", option_env!("TAURI_UPDATE_BASE_URL"))
-        .or_else(||Some("https://obs-desktop-page.vercel.app".to_string()))
-        .map(|value| value.trim_end_matches('/').to_string())
+    runtime_or_build_var(
+        "TAURI_UPDATE_BASE_URL",
+        option_env!("TAURI_UPDATE_BASE_URL"),
+    )
+    .or_else(|| Some("https://obs-desktop-page.vercel.app".to_string()))
+    .map(|value| value.trim_end_matches('/').to_string())
 }
 
 fn updater_public_key() -> Option<String> {
@@ -154,7 +157,11 @@ fn resolve_channel(app: &AppHandle) -> String {
         .unwrap_or_else(|| "stable".to_string())
 }
 
-fn disabled_snapshot(app: &AppHandle, channel: String, message: impl Into<String>) -> AppUpdateSnapshot {
+fn disabled_snapshot(
+    app: &AppHandle,
+    channel: String,
+    message: impl Into<String>,
+) -> AppUpdateSnapshot {
     AppUpdateSnapshot {
         status: "disabled".to_string(),
         message: message.into(),
@@ -226,9 +233,14 @@ fn manifest_endpoint(base_url: &str, channel: &str) -> Result<Url, AppError> {
         .map_err(|error| AppError::message(format!("Could not parse updater endpoint: {}", error)))
 }
 
-fn fetch_metadata(base_url: &str, selection: &UpdateClientSelection, channel: &str) -> Result<UpdateMetadataResponse, AppError> {
-    let mut url = Url::parse(&format!("{base_url}/api/update"))
-        .map_err(|error| AppError::message(format!("Could not parse update metadata URL: {}", error)))?;
+fn fetch_metadata(
+    base_url: &str,
+    selection: &UpdateClientSelection,
+    channel: &str,
+) -> Result<UpdateMetadataResponse, AppError> {
+    let mut url = Url::parse(&format!("{base_url}/api/update")).map_err(|error| {
+        AppError::message(format!("Could not parse update metadata URL: {}", error))
+    })?;
     {
         let mut pairs = url.query_pairs_mut();
         pairs.append_pair("currentVersion", &selection.current_version);
@@ -251,7 +263,9 @@ fn fetch_metadata(base_url: &str, selection: &UpdateClientSelection, channel: &s
     let client = Client::builder()
         .timeout(UPDATE_ROUTE_TIMEOUT)
         .build()
-        .map_err(|error| AppError::message(format!("Could not build update metadata client: {}", error)))?;
+        .map_err(|error| {
+            AppError::message(format!("Could not build update metadata client: {}", error))
+        })?;
 
     let response = client.get(url).send()?;
     if !response.status().is_success() {
@@ -259,8 +273,7 @@ fn fetch_metadata(base_url: &str, selection: &UpdateClientSelection, channel: &s
         let body = response.text().unwrap_or_default();
         return Err(AppError::message(format!(
             "Update metadata request failed with status {}. {}",
-            status,
-            body
+            status, body
         )));
     }
 
@@ -291,7 +304,10 @@ fn clear_pending_download(app: &AppHandle) {
     downloaded_bytes.take();
 }
 
-fn update_snapshot_or_default(app: &AppHandle, latest_snapshot: Option<AppUpdateSnapshot>) -> AppUpdateSnapshot {
+fn update_snapshot_or_default(
+    app: &AppHandle,
+    latest_snapshot: Option<AppUpdateSnapshot>,
+) -> AppUpdateSnapshot {
     latest_snapshot.unwrap_or_else(|| AppUpdateSnapshot {
         status: "ready-to-restart".to_string(),
         message: "Restart to finish updating.".to_string(),
@@ -341,7 +357,10 @@ fn read_macos_bundle_info_from_path(bundle_path: &Path) -> Result<MacosBundleInf
             error
         ))
     })?;
-    Ok(bundle_info_from_dictionary(bundle_path.to_path_buf(), dictionary))
+    Ok(bundle_info_from_dictionary(
+        bundle_path.to_path_buf(),
+        dictionary,
+    ))
 }
 
 fn bundle_root_from_archive_path(path: &Path) -> Option<PathBuf> {
@@ -377,13 +396,14 @@ fn read_macos_bundle_info_from_archive(bytes: &[u8]) -> Result<MacosBundleInfo, 
 
         let mut plist_bytes = Vec::new();
         entry.read_to_end(&mut plist_bytes)?;
-        let dictionary = plist::from_reader::<_, Dictionary>(Cursor::new(plist_bytes)).map_err(|error| {
-            AppError::message(format!(
-                "Could not parse macOS bundle metadata from archived {}: {}",
-                entry_path.display(),
-                error
-            ))
-        })?;
+        let dictionary =
+            plist::from_reader::<_, Dictionary>(Cursor::new(plist_bytes)).map_err(|error| {
+                AppError::message(format!(
+                    "Could not parse macOS bundle metadata from archived {}: {}",
+                    entry_path.display(),
+                    error
+                ))
+            })?;
         return Ok(bundle_info_from_dictionary(bundle_root, dictionary));
     }
 
@@ -414,7 +434,10 @@ fn current_macos_bundle_path(app: &AppHandle) -> Result<PathBuf, AppError> {
 }
 
 #[cfg(target_os = "macos")]
-fn verify_downloaded_macos_bundle(bytes: &[u8], snapshot: &AppUpdateSnapshot) -> Result<MacosBundleInfo, AppError> {
+fn verify_downloaded_macos_bundle(
+    bytes: &[u8],
+    snapshot: &AppUpdateSnapshot,
+) -> Result<MacosBundleInfo, AppError> {
     let archived_bundle = read_macos_bundle_info_from_archive(bytes)?;
     log::info!(
         "updater install: downloaded macOS archive bundle_path={} short_version={:?} build_version={:?}",
@@ -490,7 +513,10 @@ fn verify_installed_macos_bundle_after_install(
 }
 
 #[cfg(target_os = "macos")]
-fn relaunch_installed_macos_bundle(app: &AppHandle, bundle: &MacosBundleInfo) -> Result<(), AppError> {
+fn relaunch_installed_macos_bundle(
+    app: &AppHandle,
+    bundle: &MacosBundleInfo,
+) -> Result<(), AppError> {
     let executable_name = bundle.executable_name.as_deref().ok_or_else(|| {
         AppError::message(format!(
             "The updated app bundle at {} is missing CFBundleExecutable.",
@@ -584,9 +610,16 @@ async fn metadata_snapshot(app: AppHandle) -> Result<AppUpdateSnapshot, AppError
     }
 
     let selection = current_selection(&app);
-    let metadata = tauri::async_runtime::spawn_blocking(move || fetch_metadata(&base_url, &selection, &channel))
-        .await
-        .map_err(|error| AppError::message(format!("Could not join the update metadata task: {}", error)))??;
+    let metadata = tauri::async_runtime::spawn_blocking(move || {
+        fetch_metadata(&base_url, &selection, &channel)
+    })
+    .await
+    .map_err(|error| {
+        AppError::message(format!(
+            "Could not join the update metadata task: {}",
+            error
+        ))
+    })??;
 
     let snapshot = snapshot_from_metadata(&app, metadata);
     store_snapshot(&app, &snapshot);
@@ -596,7 +629,9 @@ async fn metadata_snapshot(app: AppHandle) -> Result<AppUpdateSnapshot, AppError
 
 #[tauri::command]
 pub async fn check_app_update(app: AppHandle) -> Result<AppUpdateSnapshot, String> {
-    metadata_snapshot(app).await.map_err(|error| error.to_string())
+    metadata_snapshot(app)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -610,7 +645,7 @@ pub async fn download_app_update(app: AppHandle) -> Result<AppUpdateSnapshot, St
     }
 
     if snapshot.status != "update-available" && snapshot.status != "update-required" {
-        return Ok(snapshot)
+        return Ok(snapshot);
     }
 
     let Some(base_url) = update_base_url() else {
@@ -628,7 +663,8 @@ pub async fn download_app_update(app: AppHandle) -> Result<AppUpdateSnapshot, St
         ));
     };
 
-    let endpoint = manifest_endpoint(&base_url, &snapshot.update_channel).map_err(|error| error.to_string())?;
+    let endpoint = manifest_endpoint(&base_url, &snapshot.update_channel)
+        .map_err(|error| error.to_string())?;
     let updater = app
         .updater_builder()
         .pubkey(public_key)
@@ -668,13 +704,7 @@ pub async fn download_app_update(app: AppHandle) -> Result<AppUpdateSnapshot, St
                 );
             },
             || {
-                emit_update_progress(
-                    &app,
-                    "finished",
-                    0,
-                    None,
-                    "Update download complete.",
-                );
+                emit_update_progress(&app, "finished", 0, None, "Update download complete.");
             },
         )
         .await
@@ -729,8 +759,10 @@ pub fn install_app_update(app: AppHandle) -> Result<AppUpdateSnapshot, String> {
         .expect("app update snapshot lock poisoned")
         .clone();
 
-    let update = pending_update.ok_or_else(|| "No downloaded update is ready to install.".to_string())?;
-    let bytes = downloaded_bytes.ok_or_else(|| "No downloaded update payload is available.".to_string())?;
+    let update =
+        pending_update.ok_or_else(|| "No downloaded update is ready to install.".to_string())?;
+    let bytes =
+        downloaded_bytes.ok_or_else(|| "No downloaded update payload is available.".to_string())?;
     let snapshot = update_snapshot_or_default(&app, latest_snapshot);
 
     log::info!(
@@ -758,7 +790,10 @@ pub fn install_app_update(app: AppHandle) -> Result<AppUpdateSnapshot, String> {
     let _downloaded_bundle =
         verify_downloaded_macos_bundle(bytes.as_slice(), &snapshot).map_err(|error| {
             clear_pending_download(&app);
-            log::error!("updater install: downloaded bundle verification failed: {}", error);
+            log::error!(
+                "updater install: downloaded bundle verification failed: {}",
+                error
+            );
             error.to_string()
         })?;
 
@@ -778,7 +813,10 @@ pub fn install_app_update(app: AppHandle) -> Result<AppUpdateSnapshot, String> {
     )
     .map_err(|error| {
         clear_pending_download(&app);
-        log::error!("updater install: post-install verification failed: {}", error);
+        log::error!(
+            "updater install: post-install verification failed: {}",
+            error
+        );
         error.to_string()
     })?;
 
@@ -880,7 +918,7 @@ mod tests {
         builder
             .append_data(
                 &mut header,
-                "OBS Plugin Installer.app/Contents/Info.plist",
+                "Plugin Installer for OBS.app/Contents/Info.plist",
                 plist.as_bytes(),
             )
             .expect("append plist");
@@ -891,10 +929,13 @@ mod tests {
 
     #[test]
     fn reads_macos_bundle_version_from_archive() {
-        let archive = macos_archive_with_info_plist("0.48.0", "48",);
+        let archive = macos_archive_with_info_plist("0.48.0", "48");
         let bundle = read_macos_bundle_info_from_archive(&archive).expect("bundle info");
 
-        assert_eq!(bundle.bundle_path, PathBuf::from("OBS Plugin Installer.app"));
+        assert_eq!(
+            bundle.bundle_path,
+            PathBuf::from("Plugin Installer for OBS.app")
+        );
         assert_eq!(bundle.executable_name.as_deref(), Some("app"));
         assert_eq!(bundle.short_version.as_deref(), Some("0.48.0"));
         assert_eq!(bundle.build_version.as_deref(), Some("48"));
@@ -903,10 +944,10 @@ mod tests {
 
     #[test]
     fn detects_bundle_root_from_archive_path() {
-        let path = PathBuf::from("OBS Plugin Installer.app/Contents/MacOS/app");
+        let path = PathBuf::from("Plugin Installer for OBS.app/Contents/MacOS/app");
         assert_eq!(
             bundle_root_from_archive_path(&path),
-            Some(PathBuf::from("OBS Plugin Installer.app"))
+            Some(PathBuf::from("Plugin Installer for OBS.app"))
         );
     }
 }

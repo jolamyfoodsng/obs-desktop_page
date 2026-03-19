@@ -1,6 +1,6 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "OBS Plugin Installer",
+  "productName": "Plugin Installer for OBS",
   "version": "1.1.1",
   "identifier": "com.obsplugininstaller.desktop",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "OBS Plugin Installer",
+        "title": "Plugin Installer for OBS",
         "width": 1440,
         "height": 960,
         "minWidth": 1180,

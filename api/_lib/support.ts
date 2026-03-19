@@ -249,7 +249,7 @@ function supportSubmissionText(submission: NormalizedSupportSubmission) {
 }
 
 export function buildSupportFallbackMailto(submission: NormalizedSupportSubmission, supportInbox: string) {
-  const subjectPrefix = `[OBS Plugin Installer] ${labelForKind(submission.kind)}`
+  const subjectPrefix = `[Plugin Installer for OBS] ${labelForKind(submission.kind)}`
   const subject = submission.subject ? `${subjectPrefix}: ${submission.subject}` : subjectPrefix
   const query = new URLSearchParams({
     subject,
@@ -286,7 +286,7 @@ export async function deliverSupportSubmission(submission: NormalizedSupportSubm
     )
   }
 
-  const subjectPrefix = `[OBS Plugin Installer] ${labelForKind(submission.kind)}`
+  const subjectPrefix = `[Plugin Installer for OBS] ${labelForKind(submission.kind)}`
   const emailSubject = submission.subject ? `${subjectPrefix}: ${submission.subject}` : subjectPrefix
   const html = `
     <div style="font-family:Inter,Arial,sans-serif;color:#0f172a;line-height:1.6;">

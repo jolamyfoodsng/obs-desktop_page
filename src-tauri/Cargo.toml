@@ -2,8 +2,8 @@
 name = "app"
 version = "1.1.1"
 default-run = "app"
-description = "OBS Plugin Installer desktop app built with Tauri"
-authors = ["OBS Plugin Installer contributors"]
+description = "Plugin Installer for OBS, a third-party desktop app built with Tauri"
+authors = ["Plugin Installer for OBS contributors"]
 edition = "2021"
 rust-version = "1.77.2"
 

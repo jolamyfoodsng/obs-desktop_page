@@ -90,14 +90,14 @@ pub fn run() {
             }
 
             let menu = MenuBuilder::new(app)
-                .text(TRAY_OPEN_ID, "Open OBS Plugin Installer")
+                .text(TRAY_OPEN_ID, "Open Plugin Installer for OBS")
                 .separator()
                 .text(TRAY_QUIT_ID, "Quit")
                 .build()?;
 
             let mut tray_builder = TrayIconBuilder::with_id("obs-plugin-installer-tray")
                 .menu(&menu)
-                .tooltip("OBS Plugin Installer")
+                .tooltip("Plugin Installer for OBS")
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, event: MenuEvent| match event.id().as_ref() {
                     TRAY_OPEN_ID => show_main_window(app),

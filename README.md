@@ -1,6 +1,8 @@
-# OBS Plugin Installer
+# Plugin Installer for OBS
 
-OBS Plugin Installer is a Tauri desktop MVP for safely discovering, installing, and updating a curated set of OBS Studio plugins without manually unpacking archives or guessing where OBS lives on disk.
+Plugin Installer for OBS is a Tauri desktop MVP for safely discovering, installing, and updating a curated set of OBS Studio plugins without manually unpacking archives or guessing where OBS lives on disk.
+
+Plugin Installer for OBS is a third-party tool and is not affiliated with or endorsed by the OBS Project.
 
 ## Product scope
 

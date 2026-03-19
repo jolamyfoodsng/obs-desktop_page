@@ -10,6 +10,7 @@ import { ErrorState } from './components/ErrorState'
 import { SetupWizard } from './components/SetupWizard'
 import { AppShell } from './components/layout/AppShell'
 import { getAnalyticsContext, trackAppOpenOnce } from './lib/analytics'
+import { APP_NAME } from './lib/branding'
 import { desktopApi } from './lib/tauri'
 import { DashboardPage } from './pages/DashboardPage'
 import { DiagnosticsPage } from './pages/DiagnosticsPage'
@@ -52,7 +53,7 @@ function LoadingScreen() {
       <div className="rounded-xl border border-white/10 bg-white/[0.03] px-6 py-4 shadow-panel">
         <div className="flex items-center gap-3 text-slate-300">
           <LoaderCircle className="size-5 animate-spin text-primary" />
-          Loading OBS Plugin Installer…
+          Loading {APP_NAME}…
         </div>
       </div>
     </div>
@@ -104,7 +105,7 @@ function StartupErrorScreen({
               variant: 'primary',
               disabled: isRetrying,
             }}
-            title="OBS Plugin Installer could not finish loading"
+            title={`${APP_NAME} could not finish loading`}
           />
         )}
       </div>

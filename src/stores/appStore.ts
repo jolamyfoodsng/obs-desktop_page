@@ -3,6 +3,7 @@ import { coerce, lt } from 'semver'
 import { toast } from 'sonner'
 
 import { getAnalyticsContext, getPluginAnalyticsProperties, trackEvent } from '../lib/analytics'
+import { APP_NAME } from '../lib/branding'
 import { getErrorMessage } from '../lib/errors'
 import { desktopApi } from '../lib/tauri'
 import type {
@@ -782,7 +783,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     try {
       await desktopApi.adoptInstallation(pluginId)
       set({ adoptingPluginId: null })
-      toast.success('This installation is now managed by OBS Plugin Installer.')
+      toast.success(`This installation is now managed by ${APP_NAME}.`)
       await get().loadApp()
     } catch (error) {
       set({ adoptingPluginId: null })

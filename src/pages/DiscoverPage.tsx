@@ -6,6 +6,7 @@ import { EmptyState } from '../components/EmptyState'
 import { PluginCard } from '../components/PluginCard'
 import { Badge } from '../components/ui/Badge'
 import { getAnalyticsContext, trackEvent } from '../lib/analytics'
+import { APP_DISCLAIMER, APP_TAGLINE } from '../lib/branding'
 import { getCatalogPluginState, getPluginCompatibility } from '../lib/utils'
 import { useAppStore } from '../stores/appStore'
 
@@ -148,10 +149,10 @@ export function DiscoverPage() {
           <div>
             <h1 className="text-[18px] font-semibold text-white">Plugin Catalog</h1>
             <p className="mt-1 text-[14px] text-slate-400">
-              Browse curated plugins and official OBS resources for {currentPlatform === 'macos' ? 'macOS' : currentPlatform}.
+              {APP_TAGLINE} on {currentPlatform === 'macos' ? 'macOS' : currentPlatform}.
             </p>
-            <p className="mt-1 text-[9px] text-slate-400">
-            Note: We don’t host or store plugin files. All plugins are downloaded directly from their official sources (such as OBS or the original developer) and installed on your system.
+            <p className="mt-1 text-[10px] text-slate-400">
+              {APP_DISCLAIMER} Downloads come directly from the original source pages we list.
             </p>
           </div>
           <div className="flex items-center gap-2">

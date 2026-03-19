@@ -7,6 +7,7 @@ import {
   FolderCog,
   Keyboard,
   Languages,
+  Info,
   MonitorCog,
   Palette,
   RefreshCw,
@@ -21,6 +22,7 @@ import { Button } from '../components/ui/Button'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 import { CopyPathField } from '../components/ui/CopyPathField'
 import { ShortcutHint } from '../components/ui/ShortcutHint'
+import { APP_DISCLAIMER, APP_NAME, APP_SUBTITLE, APP_TAGLINE } from '../lib/branding'
 import { cn } from '../lib/utils'
 import { useAppStore } from '../stores/appStore'
 import type { AppSettings } from '../types/desktop'
@@ -213,8 +215,8 @@ export function SettingsPage() {
             Manage your desktop utility preferences
           </h1>
           <p className="max-w-3xl text-sm leading-7 text-slate-400">
-            Control how OBS Plugin Installer behaves on this machine, where it installs plugins,
-            and how much experimental tooling you want visible while the product is still MVP-scoped.
+            Control how {APP_NAME} behaves on this machine, where it installs plugins, and how
+            much experimental tooling you want visible while the product is still MVP-scoped.
           </p>
         </header>
 
@@ -276,7 +278,7 @@ export function SettingsPage() {
             <div className="space-y-4">
             <SettingToggle
               checked={preferences.launchOnStartup}
-              description="Automatically start OBS Plugin Installer when you sign in."
+              description={`Automatically start ${APP_NAME} when you sign in.`}
               disabled={isSettingsWorking}
               onChange={(nextValue) => setPreference('launchOnStartup', nextValue)}
               title="Launch on System Startup"
@@ -602,7 +604,7 @@ export function SettingsPage() {
                 {[
                   ['desktopNotifications', 'Desktop notifications for plugin updates'],
                   ['releaseNotifications', 'New curated plugin releases in your categories'],
-                  ['developerNews', 'OBS Plugin Installer product and developer news'],
+                  ['developerNews', `${APP_NAME} product and developer news`],
                 ].map(([key, label]) => (
                   <label className="flex items-center gap-3 text-sm text-slate-300" key={key}>
                     <input
@@ -640,6 +642,28 @@ export function SettingsPage() {
                 Open support center
               </Button>
             </div>
+          </div>
+        </SettingSection>
+
+        <SettingSection
+          icon={<Info className="size-5" />}
+          title="About & Disclaimer"
+        >
+          <div className="rounded-[24px] border border-white/10 bg-white/[0.04] p-6">
+            <p className="text-lg font-semibold text-white">{APP_NAME}</p>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">{APP_SUBTITLE}</p>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-400">{APP_TAGLINE}.</p>
+
+            <div className="mt-5 rounded-[20px] border border-amber-300/20 bg-amber-400/5 px-4 py-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-200/80">
+                Third-party notice
+              </p>
+              <p className="mt-2 text-sm leading-6 text-amber-100/90">{APP_DISCLAIMER}</p>
+            </div>
+
+            <p className="mt-4 text-xs leading-6 text-slate-500">
+              Current app version: v{bootstrap?.currentVersion ?? '0.0.0'}
+            </p>
           </div>
         </SettingSection>
 
