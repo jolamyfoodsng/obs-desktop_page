@@ -241,7 +241,7 @@ export function PluginCard({
               {tag.label}
             </Badge>
           ))}
-          {isAttachPending ? <Badge tone="warning">Needs OBS attach</Badge> : null}
+          {isAttachPending ? <Badge tone="warning">Installation incomplete</Badge> : null}
         </div>
 
         <div className="mt-auto flex items-center justify-between gap-3 border-t border-white/10 pt-3">
@@ -314,7 +314,7 @@ export function PluginCard({
               {tag.label}
             </Badge>
           ))}
-          {isAttachPending ? <Badge tone="warning">Needs OBS attach</Badge> : null}
+          {isAttachPending ? <Badge tone="warning">Installation incomplete</Badge> : null}
           {isInstallerBased ? <Badge tone="neutral">Installer-based</Badge> : null}
         </div>
       </div>
