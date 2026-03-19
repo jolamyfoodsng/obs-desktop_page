@@ -356,7 +356,7 @@ export function InstalledPage() {
         (row.installedPlugin.status === 'manual-step' && row.isStandaloneTool))
     const primaryActionLabel = row.section === 'attention' ? 'Fix installation' : 'Reinstall'
     const secondaryActionLabel = row.section === 'attention' ? 'Retry' : null
-    const openPluginDetails = () => navigate(`/plugins/${row.plugin.id}`)
+    const openPluginDetails = () => navigate(`/plugin/${row.plugin.id}`)
     const removeButton = (
       <Button
         disabled={uninstallingPluginId === row.plugin.id}
@@ -394,7 +394,7 @@ export function InstalledPage() {
 
     return (
       <article
-        className="group relative overflow-hidden rounded-[24px] border border-white/10 bg-black/20 transition-all hover:border-white/20 hover:bg-black/25"
+        className="group relative cursor-pointer overflow-hidden rounded-[24px] border border-white/10 bg-black/20 transition-all hover:border-white/20 hover:bg-black/25"
         key={row.plugin.id}
       >
         <button
@@ -571,7 +571,7 @@ export function InstalledPage() {
     return (
       <article
         className={`group relative overflow-hidden rounded-[24px] border border-white/10 bg-black/20 transition-all ${
-          plugin ? 'hover:border-white/20 hover:bg-black/25' : ''
+          plugin ? 'cursor-pointer hover:border-white/20 hover:bg-black/25' : ''
         }`}
         key={`${row.pluginId}-${row.removedAt}`}
       >
@@ -579,7 +579,7 @@ export function InstalledPage() {
           <button
             aria-label={`Open ${row.pluginName}`}
             className="absolute inset-0 z-0 cursor-pointer"
-            onClick={() => navigate(`/plugins/${plugin.id}`)}
+            onClick={() => navigate(`/plugin/${plugin.id}`)}
             type="button"
           />
         ) : null}
@@ -594,7 +594,7 @@ export function InstalledPage() {
                 {plugin ? (
                   <button
                     className="pointer-events-auto text-left text-lg font-semibold text-white transition hover:text-primary group-hover:text-primary"
-                    onClick={() => navigate(`/plugins/${plugin.id}`)}
+                    onClick={() => navigate(`/plugin/${plugin.id}`)}
                     type="button"
                   >
                     {row.pluginName}
