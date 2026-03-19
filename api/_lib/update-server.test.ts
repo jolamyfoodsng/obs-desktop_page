@@ -62,6 +62,31 @@ test('macOS ARM64 chooses app.tar.gz for update and dmg for manual install', () 
   assert.equal(manual?.asset.name, 'OBS.Plugin.Installer_0.28.0_aarch64.dmg')
 })
 
+test('macOS updater bundles prefer the matching architecture-specific archive when both runners publish one', () => {
+  const catalog = buildReleaseAssetCatalog(
+    createRelease('v0.39.0', [
+      'OBS.Plugin.Installer_x64.app.tar.gz',
+      'OBS.Plugin.Installer_x64.app.tar.gz.sig',
+      'OBS.Plugin.Installer_aarch64.app.tar.gz',
+      'OBS.Plugin.Installer_aarch64.app.tar.gz.sig',
+    ]),
+  )
+
+  const armTarget = getTarget('darwin', 'arm64', 'app')
+  const intelTarget = getTarget('darwin', 'x64', 'app')
+
+  const armSelected = resolveSelectionForTarget(catalog, armTarget)
+  const intelSelected = resolveSelectionForTarget(catalog, intelTarget)
+
+  assert.equal(armSelected.kind, 'selected')
+  assert.equal(armSelected.candidate?.asset.name, 'OBS.Plugin.Installer_aarch64.app.tar.gz')
+  assert.equal(armSelected.candidate?.signatureAsset.name, 'OBS.Plugin.Installer_aarch64.app.tar.gz.sig')
+
+  assert.equal(intelSelected.kind, 'selected')
+  assert.equal(intelSelected.candidate?.asset.name, 'OBS.Plugin.Installer_x64.app.tar.gz')
+  assert.equal(intelSelected.candidate?.signatureAsset.name, 'OBS.Plugin.Installer_x64.app.tar.gz.sig')
+})
+
 test('Windows x64 chooses the EXE installer over MSI for manual selection', () => {
   const catalog = buildReleaseAssetCatalog(
     createRelease('v0.28.0', [

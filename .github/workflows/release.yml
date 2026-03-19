@@ -51,12 +51,14 @@ jobs:
             artifact_suffix: macos-x64
             bundles: app,dmg
             default_update_bundle: app
+            updater_arch_suffix: x64
           - os: macos-15
             label: macOS Apple Silicon
             platform: macos
             artifact_suffix: macos-arm64
             bundles: app,dmg
             default_update_bundle: app
+            updater_arch_suffix: aarch64
 
     steps:
       - name: Check out source
@@ -109,11 +111,25 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           TAURI_UPDATE_BASE_URL: ${{ vars.TAURI_UPDATE_BASE_URL }}
-          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
           TAURI_UPDATE_BUNDLE_TYPE: ${{ matrix.default_update_bundle }}
+
+      - name: Rename macOS updater bundles by architecture
+        if: matrix.platform == 'macos'
+        run: |
+          bundle_dir="src-tauri/target/release/bundle/macos"
+          while IFS= read -r asset; do
+            renamed="${asset%.app.tar.gz}_${{ matrix.updater_arch_suffix }}.app.tar.gz"
+            mv "$asset" "$renamed"
+            if [ -f "${asset}.sig" ]; then
+              mv "${asset}.sig" "${renamed}.sig"
+            fi
+          done < <(find "$bundle_dir" -maxdepth 1 -type f -name '*.app.tar.gz' | sort)
 
       - name: Verify generated updater assets
         run: node scripts/verify_release_assets.mjs --root src-tauri/target/release/bundle --bundles ${{ matrix.bundles }}
+
+      - name: Verify generated updater signatures
+        run: cargo run --manifest-path src-tauri/Cargo.toml --bin verify_updater_signatures -- --root src-tauri/target/release/bundle
 
       - name: Upload workflow artifacts
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}

@@ -263,6 +263,7 @@ For every push and version-tag push, GitHub Actions:
 - builds Tauri release bundles
 - generates updater signatures because `bundle.createUpdaterArtifacts` is enabled
 - verifies each matrix build produced the expected installer/update artifact and signature pairs before upload
+- verifies that every generated `.sig` file matches the updater public key embedded in the app
 - uploads installer artifacts and `.sig` files to the workflow run on normal branch pushes
 - creates a new release entry after successful `main` builds using the current app version and GitHub Actions run number
 - uploads both installer artifacts and `.sig` files to a GitHub Release automatically when the pushed ref is a version tag like `v0.2.0`
@@ -335,8 +336,6 @@ Set these on the GitHub repo before running release builds:
 - repository variables:
   - `TAURI_UPDATE_BASE_URL`
     - public Vercel update server URL, for example `https://updates.example.com`
-  - `TAURI_UPDATER_PUBLIC_KEY`
-    - public updater signing key used by the Tauri client
 - repository secrets:
   - `TAURI_SIGNING_PRIVATE_KEY`
     - private updater signing key
@@ -348,6 +347,8 @@ Optional GitHub Actions variable:
 - `TAURI_UPDATE_BUNDLE_TYPE`
   - this implementation defaults Windows metadata to `nsis`, Linux to `appimage`, and macOS to `app`
   - the real updater install path still uses Tauri's own runtime bundle type during manifest checks
+
+The updater public key is checked into the repo at `src-tauri/updater.pub.key`, synced into `src-tauri/tauri.conf.json` by `npm run sync:updater-key`, and embedded into the desktop app at build time. If you rotate the signing key pair, update `src-tauri/updater.pub.key`, rerun `npm run sync:updater-key`, and rebuild the app before shipping a new release.
 
 ### What files the Vercel API expects
 
@@ -368,6 +369,7 @@ The update server expects the GitHub Release to contain signed installer assets 
 
 This implementation intentionally ignores source-code archives when installable binaries exist.
 For macOS, the in-app updater is expected to use the signed `*.app.tar.gz` bundle, while manual fallback downloads can use the matching `.dmg` installer for the detected architecture.
+The release workflow renames macOS updater archives with an architecture suffix before upload so Intel and Apple Silicon bundles do not overwrite each other on the same GitHub Release.
 
 ### Push builds vs release builds
 
@@ -460,7 +462,6 @@ curl "http://localhost:3000/api/update?currentVersion=0.1.0&target=windows&arch=
 Set these environment variables before starting the Tauri app locally:
 
 - `TAURI_UPDATE_BASE_URL`
-- `TAURI_UPDATER_PUBLIC_KEY`
 - optional `TAURI_UPDATE_BUNDLE_TYPE`
 
 Then run:
@@ -499,6 +500,8 @@ This updater flow is production-minded, but you still need real release-signing 
 
 - `TAURI_SIGNING_PRIVATE_KEY`
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` if your key uses one
+
+The shipped app does not fetch its updater public key at runtime. It embeds the value from `src-tauri/updater.pub.key` when the desktop binary is compiled, so any updater key change requires a rebuild before update verification can succeed.
 
 You may also still want platform-native signing later:
 
