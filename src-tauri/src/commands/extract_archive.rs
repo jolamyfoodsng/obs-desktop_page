@@ -40,7 +40,9 @@ fn extract_zip(
 
     for index in 0..archive.len() {
         if should_cancel() {
-            return Err(AppError::canceled("Installation was canceled during extraction."));
+            return Err(AppError::canceled(
+                "Installation was canceled during extraction.",
+            ));
         }
 
         let mut entry = archive.by_index(index)?;
@@ -62,7 +64,9 @@ fn extract_zip(
         std::io::copy(&mut entry, &mut output_file)?;
 
         if should_cancel() {
-            return Err(AppError::canceled("Installation was canceled during extraction."));
+            return Err(AppError::canceled(
+                "Installation was canceled during extraction.",
+            ));
         }
     }
 
@@ -80,7 +84,9 @@ fn extract_tar_xz(
 
     for entry in archive.entries()? {
         if should_cancel() {
-            return Err(AppError::canceled("Installation was canceled during extraction."));
+            return Err(AppError::canceled(
+                "Installation was canceled during extraction.",
+            ));
         }
 
         let mut entry = entry?;
@@ -94,7 +100,9 @@ fn extract_tar_xz(
         entry.unpack(output_path)?;
 
         if should_cancel() {
-            return Err(AppError::canceled("Installation was canceled during extraction."));
+            return Err(AppError::canceled(
+                "Installation was canceled during extraction.",
+            ));
         }
     }
 

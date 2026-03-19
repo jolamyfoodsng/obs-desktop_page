@@ -46,7 +46,10 @@ fn detect_windows_obs_version(root: &Path) -> Option<String> {
         .args([
             "-NoProfile",
             "-Command",
-            &format!("(Get-Item -LiteralPath '{}').VersionInfo.ProductVersion", escaped),
+            &format!(
+                "(Get-Item -LiteralPath '{}').VersionInfo.ProductVersion",
+                escaped
+            ),
         ])
         .output()
         .ok()?;
@@ -61,13 +64,12 @@ fn detect_windows_obs_version(root: &Path) -> Option<String> {
 fn detect_macos_obs_version(app_bundle: &Path) -> Option<String> {
     let info_plist = app_bundle.join("Contents").join("Info.plist");
     let contents = fs::read_to_string(info_plist).ok()?;
-    let short_version = Regex::new(
-        r"<key>CFBundleShortVersionString</key>\s*<string>([^<]+)</string>",
-    )
-    .ok()?
-    .captures(&contents)
-    .and_then(|captures| captures.get(1))
-    .map(|value| value.as_str().to_string());
+    let short_version =
+        Regex::new(r"<key>CFBundleShortVersionString</key>\s*<string>([^<]+)</string>")
+            .ok()?
+            .captures(&contents)
+            .and_then(|captures| captures.get(1))
+            .map(|value| value.as_str().to_string());
 
     short_version.and_then(|value| extract_version(&value).or(Some(value)))
 }

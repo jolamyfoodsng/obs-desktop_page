@@ -20,8 +20,8 @@ fn run() -> Result<(), String> {
         .pubkey
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("updater.pub.key"));
     let public_key_text = decode_tauri_wrapped_text(&pubkey_path)?;
-    let public_key =
-        PublicKey::decode(&public_key_text).map_err(|error| format!("could not decode {}: {}", pubkey_path.display(), error))?;
+    let public_key = PublicKey::decode(&public_key_text)
+        .map_err(|error| format!("could not decode {}: {}", pubkey_path.display(), error))?;
     let public_key_id = parse_public_key_id(&public_key_text)?;
 
     println!(
@@ -132,7 +132,10 @@ impl Args {
 
 fn collect_signature_paths(root: &Path) -> Result<Vec<PathBuf>, String> {
     if !root.exists() {
-        return Err(format!("bundle directory does not exist: {}", root.display()));
+        return Err(format!(
+            "bundle directory does not exist: {}",
+            root.display()
+        ));
     }
 
     let mut signature_paths = WalkDir::new(root)
@@ -151,9 +154,12 @@ fn signed_asset_path(signature_path: &Path) -> Result<PathBuf, String> {
         .file_name()
         .and_then(|value| value.to_str())
         .ok_or_else(|| format!("invalid signature filename: {}", signature_path.display()))?;
-    let asset_name = signature_name
-        .strip_suffix(".sig")
-        .ok_or_else(|| format!("signature file does not end with .sig: {}", signature_path.display()))?;
+    let asset_name = signature_name.strip_suffix(".sig").ok_or_else(|| {
+        format!(
+            "signature file does not end with .sig: {}",
+            signature_path.display()
+        )
+    })?;
     let asset_path = signature_path.with_file_name(asset_name);
     if !asset_path.exists() {
         return Err(format!(

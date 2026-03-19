@@ -18,13 +18,13 @@ pub fn sync_autostart_setting(app: &AppHandle, launch_on_startup: bool) -> Resul
     let manager = app.autolaunch();
 
     if launch_on_startup {
-        manager
-            .enable()
-            .map_err(|error| AppError::message(format!("Could not enable launch on startup: {}", error)))?;
+        manager.enable().map_err(|error| {
+            AppError::message(format!("Could not enable launch on startup: {}", error))
+        })?;
     } else {
-        manager
-            .disable()
-            .map_err(|error| AppError::message(format!("Could not disable launch on startup: {}", error)))?;
+        manager.disable().map_err(|error| {
+            AppError::message(format!("Could not disable launch on startup: {}", error))
+        })?;
     }
 
     Ok(())
@@ -39,11 +39,9 @@ fn first_available_directory(app: &AppHandle) -> Result<PathBuf, AppError> {
         app.path().app_config_dir().ok(),
     ];
 
-    candidates
-        .into_iter()
-        .flatten()
-        .next()
-        .ok_or_else(|| AppError::message("Could not resolve a writable export directory on this device."))
+    candidates.into_iter().flatten().next().ok_or_else(|| {
+        AppError::message("Could not resolve a writable export directory on this device.")
+    })
 }
 
 fn remove_directory_contents(path: &Path) -> Result<usize, AppError> {
@@ -114,7 +112,10 @@ fn tracked_relative_path(relative_path: &str) -> Option<&Path> {
     Some(candidate)
 }
 
-fn resolve_tracked_path(record: &InstalledPluginRecord, relative_path: &str) -> Option<(PathBuf, PathBuf)> {
+fn resolve_tracked_path(
+    record: &InstalledPluginRecord,
+    relative_path: &str,
+) -> Option<(PathBuf, PathBuf)> {
     let relative_path = tracked_relative_path(relative_path)?;
     let install_root = PathBuf::from(&record.install_location);
     let primary = install_root.join(relative_path);
@@ -187,7 +188,10 @@ pub fn save_app_settings(app: AppHandle, settings: AppSettings) -> Result<AppSet
 
 #[tauri::command]
 pub fn clear_app_cache(app: AppHandle) -> Result<DesktopActionResponse, String> {
-    let cache_dir = app.path().app_cache_dir().map_err(|error| error.to_string())?;
+    let cache_dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|error| error.to_string())?;
 
     if let Some(parent) = cache_dir.parent() {
         fs::create_dir_all(parent).map_err(|error| error.to_string())?;
@@ -199,7 +203,11 @@ pub fn clear_app_cache(app: AppHandle) -> Result<DesktopActionResponse, String> 
         message: if removed == 0 {
             "The app cache was already empty.".to_string()
         } else {
-            format!("Cleared {} cached item{}.", removed, if removed == 1 { "" } else { "s" })
+            format!(
+                "Cleared {} cached item{}.",
+                removed,
+                if removed == 1 { "" } else { "s" }
+            )
         },
         path: Some(cache_dir.display().to_string()),
         count: Some(removed),
@@ -233,13 +241,20 @@ pub fn export_logs(app: AppHandle) -> Result<DesktopActionResponse, String> {
         "logFiles": log_files,
     });
 
-    fs::write(&export_path, serde_json::to_string_pretty(&payload).map_err(|error| error.to_string())?)
-        .map_err(|error| error.to_string())?;
+    fs::write(
+        &export_path,
+        serde_json::to_string_pretty(&payload).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())?;
 
     Ok(DesktopActionResponse {
         message: "Diagnostics were exported successfully.".to_string(),
         path: Some(export_path.display().to_string()),
-        count: Some(payload["logFiles"].as_array().map_or(0, |files| files.len())),
+        count: Some(
+            payload["logFiles"]
+                .as_array()
+                .map_or(0, |files| files.len()),
+        ),
     })
 }
 
@@ -253,7 +268,10 @@ pub fn reset_app_state(app: AppHandle) -> Result<DesktopActionResponse, String> 
     let default_state = PersistedState::default();
     save_state(&app, &default_state).map_err(|error| error.to_string())?;
 
-    let cache_dir = app.path().app_cache_dir().map_err(|error| error.to_string())?;
+    let cache_dir = app
+        .path()
+        .app_cache_dir()
+        .map_err(|error| error.to_string())?;
     let removed = remove_directory_contents(&cache_dir).map_err(|error| error.to_string())?;
     if let Ok(app_data_dir) = app.path().app_data_dir() {
         let _ = fs::remove_dir_all(app_data_dir.join("install-backups"));
@@ -297,11 +315,11 @@ pub fn uninstall_plugin(app: AppHandle, plugin_id: String) -> Result<UninstallRe
     let mut removed_directories = 0usize;
 
     for relative_path in &record.installed_files {
-        let Some((existing_path, cleanup_root)) = resolve_tracked_path(&record, relative_path) else {
+        let Some((existing_path, cleanup_root)) = resolve_tracked_path(&record, relative_path)
+        else {
             eprintln!(
                 "[uninstall] plugin={} tracked_path_missing relative_path={}",
-                record.plugin_id,
-                relative_path
+                record.plugin_id, relative_path
             );
             continue;
         };
@@ -344,8 +362,8 @@ pub fn uninstall_plugin(app: AppHandle, plugin_id: String) -> Result<UninstallRe
         removed_files += 1;
 
         if let Some(parent) = existing_path.parent() {
-            removed_directories +=
-                prune_empty_directories(parent, &cleanup_root).map_err(|error| error.to_string())?;
+            removed_directories += prune_empty_directories(parent, &cleanup_root)
+                .map_err(|error| error.to_string())?;
         }
     }
 
@@ -357,10 +375,7 @@ pub fn uninstall_plugin(app: AppHandle, plugin_id: String) -> Result<UninstallRe
 
     eprintln!(
         "[uninstall] plugin={} removed_files={} removed_directories={} remaining_tracked_files={}",
-        record.plugin_id,
-        removed_files,
-        removed_directories,
-        remaining_tracked_files
+        record.plugin_id, removed_files, removed_directories, remaining_tracked_files
     );
 
     push_install_history(
@@ -376,15 +391,25 @@ pub fn uninstall_plugin(app: AppHandle, plugin_id: String) -> Result<UninstallRe
                 "Tracked install record removed after uninstall; files were already missing."
                     .to_string()
             } else {
-                format!("Removed {} tracked file(s) from the OBS install.", removed_files)
+                format!(
+                    "Removed {} tracked file(s) from the OBS install.",
+                    removed_files
+                )
             },
             timestamp: Utc::now().to_rfc3339(),
             file_count: removed_files,
-            backup_root: record.backup.as_ref().map(|backup| backup.backup_root.clone()),
+            backup_root: record
+                .backup
+                .as_ref()
+                .map(|backup| backup.backup_root.clone()),
             verification_status: record.verification_status.clone(),
         },
     );
-    if let Some(backup_root) = record.backup.as_ref().map(|backup| backup.backup_root.clone()) {
+    if let Some(backup_root) = record
+        .backup
+        .as_ref()
+        .map(|backup| backup.backup_root.clone())
+    {
         let _ = fs::remove_dir_all(backup_root);
     }
     state.installed_plugins.remove(&plugin_id);

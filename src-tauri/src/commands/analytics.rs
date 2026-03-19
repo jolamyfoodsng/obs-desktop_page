@@ -92,10 +92,7 @@ pub async fn capture_analytics_event(request: AnalyticsEventRequest) -> Result<(
         Ok(response) => {
             let status = response.status();
             let body = response.text().await.unwrap_or_default();
-            let message = format!(
-                "PostHog rejected event with status {}: {}",
-                status, body
-            );
+            let message = format!("PostHog rejected event with status {}: {}", status, body);
             eprintln!("[analytics] {}", message);
             Err(message)
         }
