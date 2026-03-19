@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   buildReleaseAssetCatalog,
+  buildReleaseTagCandidates,
   classifyReleaseAsset,
   resolveManualFallbackForTarget,
   resolveSelectionForTarget,
@@ -165,6 +166,12 @@ test('classification stays stable for inconsistent filenames', () => {
 
   assert.equal(versionedAppImage.canonicalName, 'obs.plugin.installer.v0.16.0.appimage')
   assert.equal(versionedAppImage.versionState, 'match')
+})
+
+test('release tag candidates cover version tags with and without v-dot prefixes', () => {
+  assert.deepEqual(buildReleaseTagCandidates('0.31.0'), ['0.31.0', 'v0.31.0', 'v.0.31.0'])
+  assert.deepEqual(buildReleaseTagCandidates('v0.31.0'), ['v0.31.0', '0.31.0', 'v.0.31.0'])
+  assert.deepEqual(buildReleaseTagCandidates('v.0.31.0'), ['v.0.31.0', '0.31.0', 'v0.31.0'])
 })
 
 test('signatures must match the exact selected updater asset', () => {

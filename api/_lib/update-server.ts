@@ -485,10 +485,45 @@ async function githubJson<T>(path: string) {
   return response.json() as Promise<T>
 }
 
+export function buildReleaseTagCandidates(versionOrTag: string) {
+  const trimmed = versionOrTag.trim()
+  const normalized = normalizeVersion(trimmed)
+  const candidates: string[] = []
+
+  const addCandidate = (value: string | null | undefined) => {
+    const candidate = value?.trim()
+    if (!candidate || candidates.includes(candidate)) {
+      return
+    }
+    candidates.push(candidate)
+  }
+
+  addCandidate(trimmed)
+
+  if (trimmed.startsWith('v.')) {
+    const bare = trimmed.slice(2)
+    addCandidate(bare)
+    addCandidate(`v${bare}`)
+  } else if (trimmed.startsWith('v')) {
+    const bare = trimmed.slice(1)
+    addCandidate(bare)
+    addCandidate(`v.${bare}`)
+  } else {
+    addCandidate(`v${trimmed}`)
+    addCandidate(`v.${trimmed}`)
+  }
+
+  if (normalized) {
+    addCandidate(normalized)
+    addCandidate(`v${normalized}`)
+    addCandidate(`v.${normalized}`)
+  }
+
+  return candidates
+}
+
 async function fetchReleaseByTag(versionOrTag: string) {
-  const candidates = versionOrTag.startsWith('v')
-    ? [versionOrTag, versionOrTag.slice(1)]
-    : [versionOrTag, `v${versionOrTag}`]
+  const candidates = buildReleaseTagCandidates(versionOrTag)
 
   for (const candidate of candidates) {
     try {

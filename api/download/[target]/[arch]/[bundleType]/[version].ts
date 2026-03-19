@@ -33,15 +33,30 @@ export default async function handler(request: VercelRequest, response: VercelRe
   const posthog = getPostHogClient()
 
   try {
-    const payload = await resolveUpdateCatalog({
-      request,
-      target,
-      arch,
-      bundleType,
-      currentVersion: version,
-      channel,
-      releaseVersion: version,
-    })
+    let payload
+    try {
+      payload = await resolveUpdateCatalog({
+        request,
+        target,
+        arch,
+        bundleType,
+        currentVersion: version,
+        channel,
+        releaseVersion: version,
+      })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      if (message.startsWith('No GitHub release was found for ')) {
+        await safeShutdown(posthog)
+        return sendError(
+          response,
+          404,
+          `Requested release ${version} is not available. Re-check for updates to refresh the latest release metadata.`,
+        )
+      }
+
+      throw error
+    }
 
     const platformKey = payload.selectedPlatform ?? `${target}-${arch}-${bundleType}`
     const platform = payload.platforms[platformKey]
