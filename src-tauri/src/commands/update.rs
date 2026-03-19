@@ -1,12 +1,17 @@
+use std::io::{Cursor, Read};
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
+use flate2::read::GzDecoder;
+use plist::Dictionary;
 use reqwest::blocking::Client;
 use reqwest::Url;
 use semver::Version;
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_updater::{Update, UpdaterExt};
+use tar::Archive;
+use tauri_plugin_updater::{extract_path_from_executable, Update, UpdaterExt};
 
 use crate::commands::store::load_state;
 use crate::models::state::{AppUpdateProgressEvent, AppUpdateSnapshot};
@@ -51,6 +56,22 @@ struct UpdateClientSelection {
     target: String,
     arch: String,
     bundle_type: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct MacosBundleInfo {
+    bundle_path: PathBuf,
+    executable_name: Option<String>,
+    short_version: Option<String>,
+    build_version: Option<String>,
+}
+
+impl MacosBundleInfo {
+    fn reported_version(&self) -> Option<&str> {
+        self.short_version
+            .as_deref()
+            .or(self.build_version.as_deref())
+    }
 }
 
 fn runtime_or_build_var(name: &str, build_value: Option<&str>) -> Option<String> {
@@ -260,6 +281,238 @@ fn clear_pending_download(app: &AppHandle) {
     downloaded_bytes.take();
 }
 
+fn update_snapshot_or_default(app: &AppHandle, latest_snapshot: Option<AppUpdateSnapshot>) -> AppUpdateSnapshot {
+    latest_snapshot.unwrap_or_else(|| AppUpdateSnapshot {
+        status: "ready-to-restart".to_string(),
+        message: "Restart to finish updating.".to_string(),
+        current_version: app.package_info().version.to_string(),
+        latest_version: None,
+        minimum_supported_version: None,
+        release_notes: None,
+        published_at: None,
+        update_channel: resolve_channel(app),
+        release_tag: None,
+        release_url: None,
+        selected_asset_name: None,
+        selected_asset_reason: None,
+        selected_asset_url: None,
+        selected_asset_size: None,
+        manual_fallback_name: None,
+        manual_fallback_reason: None,
+        manual_fallback_url: None,
+        manual_fallback_size: None,
+    })
+}
+
+fn bundle_info_from_dictionary(bundle_path: PathBuf, dictionary: Dictionary) -> MacosBundleInfo {
+    MacosBundleInfo {
+        executable_name: dictionary
+            .get("CFBundleExecutable")
+            .and_then(|value| value.as_string())
+            .map(ToOwned::to_owned),
+        short_version: dictionary
+            .get("CFBundleShortVersionString")
+            .and_then(|value| value.as_string())
+            .map(ToOwned::to_owned),
+        build_version: dictionary
+            .get("CFBundleVersion")
+            .and_then(|value| value.as_string())
+            .map(ToOwned::to_owned),
+        bundle_path,
+    }
+}
+
+fn read_macos_bundle_info_from_path(bundle_path: &Path) -> Result<MacosBundleInfo, AppError> {
+    let info_plist = bundle_path.join("Contents").join("Info.plist");
+    let dictionary = plist::from_file::<_, Dictionary>(&info_plist).map_err(|error| {
+        AppError::message(format!(
+            "Could not read macOS bundle metadata from {}: {}",
+            info_plist.display(),
+            error
+        ))
+    })?;
+    Ok(bundle_info_from_dictionary(bundle_path.to_path_buf(), dictionary))
+}
+
+fn bundle_root_from_archive_path(path: &Path) -> Option<PathBuf> {
+    let mut bundle_path = PathBuf::new();
+    for component in path.components() {
+        let name = component.as_os_str();
+        bundle_path.push(name);
+        if name.to_string_lossy().ends_with(".app") {
+            return Some(bundle_path);
+        }
+    }
+    None
+}
+
+fn is_bundle_info_plist_path(path: &Path, bundle_root: &Path) -> bool {
+    path == bundle_root.join("Contents").join("Info.plist")
+}
+
+fn read_macos_bundle_info_from_archive(bytes: &[u8]) -> Result<MacosBundleInfo, AppError> {
+    let decoder = GzDecoder::new(Cursor::new(bytes));
+    let mut archive = Archive::new(decoder);
+
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let entry_path = entry.path()?.into_owned();
+        let Some(bundle_root) = bundle_root_from_archive_path(&entry_path) else {
+            continue;
+        };
+
+        if !is_bundle_info_plist_path(&entry_path, &bundle_root) {
+            continue;
+        }
+
+        let mut plist_bytes = Vec::new();
+        entry.read_to_end(&mut plist_bytes)?;
+        let dictionary = plist::from_reader::<_, Dictionary>(Cursor::new(plist_bytes)).map_err(|error| {
+            AppError::message(format!(
+                "Could not parse macOS bundle metadata from archived {}: {}",
+                entry_path.display(),
+                error
+            ))
+        })?;
+        return Ok(bundle_info_from_dictionary(bundle_root, dictionary));
+    }
+
+    Err(AppError::message(
+        "The downloaded macOS updater bundle is missing Contents/Info.plist.",
+    ))
+}
+
+#[cfg(target_os = "macos")]
+fn current_macos_bundle_path(app: &AppHandle) -> Result<PathBuf, AppError> {
+    let current_binary = tauri::process::current_binary(&app.env()).map_err(|error| {
+        AppError::message(format!(
+            "Could not resolve the current app executable path: {}",
+            error
+        ))
+    })?;
+    log::info!(
+        "updater install: current executable path={}",
+        current_binary.display()
+    );
+    extract_path_from_executable(&current_binary).map_err(|error| {
+        AppError::message(format!(
+            "Could not resolve the installed app bundle path from {}: {}",
+            current_binary.display(),
+            error
+        ))
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn verify_downloaded_macos_bundle(bytes: &[u8], snapshot: &AppUpdateSnapshot) -> Result<MacosBundleInfo, AppError> {
+    let archived_bundle = read_macos_bundle_info_from_archive(bytes)?;
+    log::info!(
+        "updater install: downloaded macOS archive bundle_path={} short_version={:?} build_version={:?}",
+        archived_bundle.bundle_path.display(),
+        archived_bundle.short_version,
+        archived_bundle.build_version
+    );
+
+    let expected_version = snapshot.latest_version.as_deref();
+    let archived_version = archived_bundle.reported_version();
+    if let (Some(expected), Some(found)) = (expected_version, archived_version) {
+        if normalize_semver(expected) != normalize_semver(found) {
+            return Err(AppError::message(format!(
+                "The downloaded updater bundle {} contains app version {}, but the release requires {}. The published macOS updater asset is stale or misbuilt.",
+                snapshot
+                    .selected_asset_name
+                    .as_deref()
+                    .unwrap_or("macOS updater bundle"),
+                found,
+                expected
+            )));
+        }
+    }
+
+    Ok(archived_bundle)
+}
+
+#[cfg(target_os = "macos")]
+fn verify_installed_macos_bundle_after_install(
+    bundle_path: &Path,
+    snapshot: &AppUpdateSnapshot,
+    before_install: Option<&MacosBundleInfo>,
+) -> Result<MacosBundleInfo, AppError> {
+    let installed_bundle = read_macos_bundle_info_from_path(bundle_path)?;
+    log::info!(
+        "updater install: installed bundle after apply path={} short_version={:?} build_version={:?}",
+        installed_bundle.bundle_path.display(),
+        installed_bundle.short_version,
+        installed_bundle.build_version
+    );
+
+    if let Some(expected) = snapshot.latest_version.as_deref() {
+        let found = installed_bundle.reported_version().ok_or_else(|| {
+            AppError::message(format!(
+                "The updated app bundle at {} does not declare a bundle version after install.",
+                bundle_path.display()
+            ))
+        })?;
+
+        if normalize_semver(expected) != normalize_semver(found) {
+            return Err(AppError::message(format!(
+                "The updater applied {}, but the installed app at {} still reports version {} instead of {}.",
+                snapshot
+                    .selected_asset_name
+                    .as_deref()
+                    .unwrap_or("the downloaded updater bundle"),
+                bundle_path.display(),
+                found,
+                expected
+            )));
+        }
+    } else if let Some(previous_bundle) = before_install {
+        if installed_bundle.reported_version() == previous_bundle.reported_version() {
+            return Err(AppError::message(format!(
+                "The updater finished, but the installed app at {} still reports version {}. The app bundle did not change.",
+                bundle_path.display(),
+                installed_bundle.reported_version().unwrap_or("unknown")
+            )));
+        }
+    }
+
+    Ok(installed_bundle)
+}
+
+#[cfg(target_os = "macos")]
+fn relaunch_installed_macos_bundle(app: &AppHandle, bundle: &MacosBundleInfo) -> Result<(), AppError> {
+    let executable_name = bundle.executable_name.as_deref().ok_or_else(|| {
+        AppError::message(format!(
+            "The updated app bundle at {} is missing CFBundleExecutable.",
+            bundle.bundle_path.display()
+        ))
+    })?;
+    let executable_path = bundle
+        .bundle_path
+        .join("Contents")
+        .join("MacOS")
+        .join(executable_name);
+
+    log::info!(
+        "updater install: relaunching installed macOS app executable={}",
+        executable_path.display()
+    );
+
+    app.cleanup_before_exit();
+    std::process::Command::new(&executable_path)
+        .args(std::env::args_os().skip(1))
+        .spawn()
+        .map_err(|error| {
+            AppError::message(format!(
+                "Could not relaunch the updated app from {}: {}",
+                executable_path.display(),
+                error
+            ))
+        })?;
+
+    std::process::exit(0);
+}
+
 fn emit_update_progress(
     app: &AppHandle,
     stage: &str,
@@ -380,6 +633,15 @@ pub async fn download_app_update(app: AppHandle) -> Result<AppUpdateSnapshot, St
         .map_err(|error| error.to_string())?
         .ok_or_else(|| "No update is available for this build.".to_string())?;
 
+    log::info!(
+        "updater download: current_version={} latest_version={} target={} asset={:?} reason={:?}",
+        snapshot.current_version,
+        snapshot.latest_version.as_deref().unwrap_or("unknown"),
+        update.target,
+        snapshot.selected_asset_name,
+        snapshot.selected_asset_reason
+    );
+
     emit_update_progress(&app, "started", 0, None, "Downloading update...");
 
     let mut downloaded_bytes = 0_u64;
@@ -459,39 +721,74 @@ pub fn install_app_update(app: AppHandle) -> Result<AppUpdateSnapshot, String> {
 
     let update = pending_update.ok_or_else(|| "No downloaded update is ready to install.".to_string())?;
     let bytes = downloaded_bytes.ok_or_else(|| "No downloaded update payload is available.".to_string())?;
-    let _snapshot = latest_snapshot.unwrap_or_else(|| AppUpdateSnapshot {
-        status: "ready-to-restart".to_string(),
-        message: "Restart to finish updating.".to_string(),
-        current_version: app.package_info().version.to_string(),
-        latest_version: None,
-        minimum_supported_version: None,
-        release_notes: None,
-        published_at: None,
-        update_channel: resolve_channel(&app),
-        release_tag: None,
-        release_url: None,
-        selected_asset_name: None,
-        selected_asset_reason: None,
-        selected_asset_url: None,
-        selected_asset_size: None,
-        manual_fallback_name: None,
-        manual_fallback_reason: None,
-        manual_fallback_url: None,
-        manual_fallback_size: None,
-    });
+    let snapshot = update_snapshot_or_default(&app, latest_snapshot);
 
-    update
-        .install(bytes.as_slice())
+    log::info!(
+        "updater install: begin current_version={} latest_version={:?} asset={:?}",
+        snapshot.current_version,
+        snapshot.latest_version,
+        snapshot.selected_asset_name
+    );
+
+    #[cfg(target_os = "macos")]
+    let bundle_path = current_macos_bundle_path(&app).map_err(|error| error.to_string())?;
+    #[cfg(target_os = "macos")]
+    let bundle_before_install = read_macos_bundle_info_from_path(&bundle_path)
+        .map(Some)
+        .or_else(|error| {
+            log::warn!(
+                "updater install: could not read installed bundle metadata before install from {}: {}",
+                bundle_path.display(),
+                error
+            );
+            Ok::<Option<MacosBundleInfo>, AppError>(None)
+        })
         .map_err(|error| error.to_string())?;
+    #[cfg(target_os = "macos")]
+    let _downloaded_bundle =
+        verify_downloaded_macos_bundle(bytes.as_slice(), &snapshot).map_err(|error| {
+            clear_pending_download(&app);
+            log::error!("updater install: downloaded bundle verification failed: {}", error);
+            error.to_string()
+        })?;
+
+    update.install(bytes.as_slice()).map_err(|error| {
+        clear_pending_download(&app);
+        log::error!("updater install: apply failed: {}", error);
+        error.to_string()
+    })?;
+
+    log::info!("updater install: apply completed");
+
+    #[cfg(target_os = "macos")]
+    let installed_bundle = verify_installed_macos_bundle_after_install(
+        &bundle_path,
+        &snapshot,
+        bundle_before_install.as_ref(),
+    )
+    .map_err(|error| {
+        clear_pending_download(&app);
+        log::error!("updater install: post-install verification failed: {}", error);
+        error.to_string()
+    })?;
 
     clear_pending_download(&app);
 
     #[cfg(target_os = "windows")]
     {
-        return Ok(_snapshot);
+        return Ok(snapshot);
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
+    {
+        relaunch_installed_macos_bundle(&app, &installed_bundle).map_err(|error| {
+            log::error!("updater install: relaunch failed: {}", error);
+            error.to_string()
+        })?;
+        unreachable!("macOS relaunch exits the current process");
+    }
+
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
     {
         app.restart();
     }
@@ -534,4 +831,72 @@ fn is_required_update(snapshot: &AppUpdateSnapshot) -> bool {
     };
 
     current_version < minimum_version
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    use tar::Builder;
+
+    fn plist_contents(version: &str, build: &str, executable: &str) -> String {
+        format!(
+            r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key>
+  <string>{}</string>
+  <key>CFBundleShortVersionString</key>
+  <string>{}</string>
+  <key>CFBundleVersion</key>
+  <string>{}</string>
+</dict>
+</plist>"#,
+            executable, version, build
+        )
+    }
+
+    fn macos_archive_with_info_plist(version: &str, build: &str) -> Vec<u8> {
+        let plist = plist_contents(version, build, "app");
+        let encoder = GzEncoder::new(Vec::new(), Compression::default());
+        let mut builder = Builder::new(encoder);
+
+        let mut header = tar::Header::new_gnu();
+        header.set_mode(0o644);
+        header.set_size(plist.len() as u64);
+        header.set_cksum();
+        builder
+            .append_data(
+                &mut header,
+                "OBS Plugin Installer.app/Contents/Info.plist",
+                plist.as_bytes(),
+            )
+            .expect("append plist");
+
+        let encoder = builder.into_inner().expect("builder into inner");
+        encoder.finish().expect("finish archive")
+    }
+
+    #[test]
+    fn reads_macos_bundle_version_from_archive() {
+        let archive = macos_archive_with_info_plist("0.48.0", "48",);
+        let bundle = read_macos_bundle_info_from_archive(&archive).expect("bundle info");
+
+        assert_eq!(bundle.bundle_path, PathBuf::from("OBS Plugin Installer.app"));
+        assert_eq!(bundle.executable_name.as_deref(), Some("app"));
+        assert_eq!(bundle.short_version.as_deref(), Some("0.48.0"));
+        assert_eq!(bundle.build_version.as_deref(), Some("48"));
+        assert_eq!(bundle.reported_version(), Some("0.48.0"));
+    }
+
+    #[test]
+    fn detects_bundle_root_from_archive_path() {
+        let path = PathBuf::from("OBS Plugin Installer.app/Contents/MacOS/app");
+        assert_eq!(
+            bundle_root_from_archive_path(&path),
+            Some(PathBuf::from("OBS Plugin Installer.app"))
+        );
+    }
 }

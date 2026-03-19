@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process"
 import fs from "node:fs"
 import path from "node:path"
 
@@ -88,7 +89,74 @@ function relativePaths(rootDir, files) {
   return files.map((filePath) => path.relative(rootDir, filePath).split(path.sep).join('/'))
 }
 
-function verifyBundle(rootDir, allFiles, bundleType) {
+function normalizeVersion(version) {
+  return String(version ?? '').trim().replace(/^v/i, '')
+}
+
+function readExpectedVersion(rootDir, explicitVersion) {
+  if (explicitVersion) {
+    return normalizeVersion(explicitVersion)
+  }
+
+  const packageJson = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8'))
+  return normalizeVersion(packageJson.version)
+}
+
+function parsePlistString(plistSource, key) {
+  const matcher = new RegExp(`<key>${key}</key>\\s*<string>([^<]+)</string>`)
+  return plistSource.match(matcher)?.[1]?.trim() ?? null
+}
+
+function readMacosBundleVersionFromArchive(filePath) {
+  const listing = execFileSync('tar', ['-tzf', filePath], { encoding: 'utf8' })
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+
+  const infoPlistPath = listing.find((entry) => entry.endsWith('/Contents/Info.plist') && entry.includes('.app/'))
+  if (!infoPlistPath) {
+    throw new Error(`macOS updater archive is missing Contents/Info.plist: ${filePath}`)
+  }
+
+  const plistSource = execFileSync('tar', ['-xOf', filePath, infoPlistPath], { encoding: 'utf8' })
+  const shortVersion = parsePlistString(plistSource, 'CFBundleShortVersionString')
+  const buildVersion = parsePlistString(plistSource, 'CFBundleVersion')
+  const reportedVersion = normalizeVersion(shortVersion ?? buildVersion)
+
+  if (!reportedVersion) {
+    throw new Error(`macOS updater archive does not declare CFBundleShortVersionString or CFBundleVersion: ${filePath}`)
+  }
+
+  return {
+    infoPlistPath,
+    shortVersion,
+    buildVersion,
+    reportedVersion,
+  }
+}
+
+function verifyMacosArchiveVersions(rootDir, bundleFiles, expectedVersion) {
+  if (!expectedVersion) {
+    throw new Error('Could not determine the expected app version for macOS updater archive verification.')
+  }
+
+  for (const filePath of bundleFiles) {
+    const archiveVersion = readMacosBundleVersionFromArchive(filePath)
+
+    if (archiveVersion.reportedVersion !== expectedVersion) {
+      throw new Error(
+        `macOS updater archive version mismatch for ${path.relative(rootDir, filePath)}: ` +
+          `archive reports ${archiveVersion.reportedVersion}, expected ${expectedVersion}.`,
+      )
+    }
+
+    console.log(
+      `[verify-release-assets] macOS updater archive version OK: ${path.relative(rootDir, filePath)} -> ${archiveVersion.reportedVersion}`,
+    )
+  }
+}
+
+function verifyBundle(rootDir, allFiles, bundleType, expectedVersion) {
   const rule = BUNDLE_RULES[bundleType]
   if (!rule) {
     throw new Error(`Unsupported bundle type: ${bundleType}`)
@@ -120,12 +188,17 @@ function verifyBundle(rootDir, allFiles, bundleType) {
       console.log(` - ${filePath}.sig`)
     }
   }
+
+  if (bundleType === 'app') {
+    verifyMacosArchiveVersions(rootDir, bundleFiles, expectedVersion)
+  }
 }
 
 function main() {
   const args = parseArgs(process.argv.slice(2))
   const rootDir = path.resolve(String(args.root ?? 'src-tauri/target/release/bundle'))
   const bundles = normalizeBundles(args.bundles)
+  const expectedVersion = readExpectedVersion(process.cwd(), args['expected-version'])
 
   if (bundles.length === 0) {
     throw new Error('Pass --bundles with at least one bundle type.')
@@ -139,7 +212,7 @@ function main() {
   console.log(`[verify-release-assets] inspecting ${allFiles.length} file(s) under ${rootDir}`)
 
   for (const bundleType of bundles) {
-    verifyBundle(rootDir, allFiles, bundleType)
+    verifyBundle(rootDir, allFiles, bundleType, expectedVersion)
   }
 }
 
