@@ -665,69 +665,6 @@ export function InstalledPage() {
           </section>
         ) : null}
 
-<<<<<<< HEAD
-                                  void installPlugin(plugin.id, {
-                                    overwrite: true,
-                                    packageId: hasGitHubReleaseSource(plugin)
-                                      ? null
-                                      : recommendedPackage?.id ?? null,
-                                  })
-                                }}
-                              >
-                                <RefreshCw className="size-4" />
-                                {installedPlugin.status === 'manual-step'
-                                  ? isStandaloneTool
-                                    ? 'Open setup'
-                                    : 'Retry'
-                                  : hasUpdate
-                                    ? 'Update'
-                                    : isInstallerInstall
-                                      ? 'Re-install'
-                                      : isStandaloneTool
-                                        ? 'Reinstall'
-                                        : 'Repair'}
-                              </Button>
-                            )}
-                            {isScriptEntry ? (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => void revealPath(installedPlugin.installLocation)}
-                              >
-                                <FolderOpen className="size-4" />
-                                Open Scripts Folder
-                              </Button>
-                            ) : null}
-                            <Button
-                              disabled={!canDelete || uninstallingPluginId === plugin.id}
-                              size="sm"
-                              title={
-                                canDelete
-                                  ? 'Delete this installed plugin'
-                                  : 'Only installs fully managed by OBS Plugin Installer can be removed automatically.'
-                              }
-                              variant="ghost"
-                              onClick={() =>
-                                setPendingDelete({
-                                  pluginId: plugin.id,
-                                  pluginName: plugin.name,
-                                  installLocation: installedPlugin.installLocation,
-                                })
-                              }
-                            >
-                              <Trash2 className="size-4" />
-                            </Button>
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-=======
         {removedRows.length > 0 ? (
           <section className="overflow-hidden rounded-[32px] border border-white/10 bg-white/[0.04] shadow-panel">
             <SectionHeader
@@ -739,7 +676,6 @@ export function InstalledPage() {
             <div className="space-y-4 p-5">{removedRows.map(renderRemovedRow)}</div>
           </section>
         ) : null}
->>>>>>> 9222554 (Refine plugin state detection and sections)
       </div>
 
       <ConfirmDialog
