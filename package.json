@@ -24,7 +24,7 @@
     "release:patch": "npm run version:patch && node scripts/push-version-commit.cjs",
     "release:minor": "npm run version:minor && node scripts/push-version-commit.cjs",
     "release:major": "npm run version:major && node scripts/push-version-commit.cjs",
-    "test": "node --test api/_lib/update-server.test.ts",
+    "test": "node --test api/_lib/update-server.test.ts api/_lib/support.test.ts",
     "typecheck": "tsc -b",
     "tauri": "tauri"
   },

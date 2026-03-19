@@ -256,14 +256,14 @@ export function PluginDetailsPage() {
                       </Badge>
                     ) : null}
                     {isInstalledExternal ? (
-                      <Badge tone="warning">Installed externally</Badge>
+                      <Badge tone="warning">Detected in OBS</Badge>
                     ) : null}
                     {isUpdateAvailable ? <Badge tone="warning">Update available</Badge> : null}
                     {installedPlugin?.verificationStatus === 'verified' ? (
                       <Badge tone="success">Verified files</Badge>
                     ) : null}
                     {installedPlugin?.verificationStatus === 'missing-files' ? (
-                      <Badge tone="danger">Verification failed</Badge>
+                      <Badge tone="danger">Missing installation files</Badge>
                     ) : null}
                     {installedPlugin?.backup ? (
                       <Badge tone="neutral">Rollback snapshot</Badge>
