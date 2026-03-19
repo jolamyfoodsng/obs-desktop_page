@@ -674,6 +674,7 @@ export function AppShell() {
       </div>
 
       <InstallProgressModal
+        key={`${installProgress?.pluginId ?? 'none'}:${isInstallProgressVisible ? 'open' : 'closed'}`}
         open={isInstallProgressVisible}
         isCanceling={Boolean(
           installProgress &&

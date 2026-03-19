@@ -17,6 +17,7 @@ pub struct InstallCopyOperation {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlannedArchiveKind {
     ObsPlugin,
+    ThemeBundle,
     StandaloneTool,
     Review,
 }
@@ -25,6 +26,7 @@ pub enum PlannedArchiveKind {
 pub enum PlannedArchiveDestination {
     ObsPluginBin,
     ObsPluginData,
+    ObsTheme,
     StandaloneTool,
 }
 
@@ -403,14 +405,13 @@ fn strip_module_prefix(path: &Path, hints: &[String]) -> PathBuf {
         start_index += 1;
     }
 
-    let stripped = segments
-        .iter()
-        .skip(start_index)
-        .map(PathBuf::from)
-        .fold(PathBuf::new(), |mut acc, segment| {
+    let stripped = segments.iter().skip(start_index).map(PathBuf::from).fold(
+        PathBuf::new(),
+        |mut acc, segment| {
             acc.push(segment);
             acc
-        });
+        },
+    );
 
     if stripped.as_os_str().is_empty() {
         path.file_name().map(PathBuf::from).unwrap_or_default()
@@ -438,8 +439,17 @@ fn is_documentation_file(path: &Path) -> bool {
 
     matches!(
         file_name.as_str(),
-        "readme" | "readme.txt" | "readme.md" | "license" | "license.txt" | "license.md"
-            | "copying" | "copying.txt" | "changelog" | "changelog.md" | "authors"
+        "readme"
+            | "readme.txt"
+            | "readme.md"
+            | "license"
+            | "license.txt"
+            | "license.md"
+            | "copying"
+            | "copying.txt"
+            | "changelog"
+            | "changelog.md"
+            | "authors"
     )
 }
 
@@ -525,8 +535,8 @@ fn is_resource_candidate(relative: &Path, resource_hints: &[String]) -> bool {
         "obs-plugins",
     ];
     let resource_extensions = [
-        "json", "ini", "cfg", "txt", "png", "jpg", "jpeg", "gif", "svg", "effect", "shader",
-        "lua", "py", "ttf", "otf", "plist", "xml",
+        "json", "ini", "cfg", "txt", "png", "jpg", "jpeg", "gif", "svg", "effect", "shader", "lua",
+        "py", "ttf", "otf", "plist", "xml",
     ];
 
     lower
@@ -542,15 +552,17 @@ fn binary_destination(relative: &Path, name_hints: &[String]) -> PathBuf {
     let tail_segments = path_segments(&tail);
     let lower = path_segments_lower(&tail);
 
-    if lower.first().is_some_and(|segment| segment == "obs-plugins") {
-        return tail_segments
-            .into_iter()
-            .skip(1)
-            .map(PathBuf::from)
-            .fold(PathBuf::new(), |mut acc, segment| {
+    if lower
+        .first()
+        .is_some_and(|segment| segment == "obs-plugins")
+    {
+        return tail_segments.into_iter().skip(1).map(PathBuf::from).fold(
+            PathBuf::new(),
+            |mut acc, segment| {
                 acc.push(segment);
                 acc
-            });
+            },
+        );
     }
 
     tail
@@ -609,21 +621,29 @@ fn build_review_plan(
     }
 }
 
-fn build_obs_review_items(items: &[PlannedArchiveItem]) -> Vec<InstallReviewItem> {
-    items.iter()
+fn planned_destination_label(item: &PlannedArchiveItem) -> String {
+    match item.destination {
+        PlannedArchiveDestination::ObsPluginBin => {
+            format!("OBS plugin bin/{}", item.relative_destination.display())
+        }
+        PlannedArchiveDestination::ObsPluginData => {
+            format!("OBS plugin data/{}", item.relative_destination.display())
+        }
+        PlannedArchiveDestination::ObsTheme => {
+            format!("OBS theme folder/{}", item.relative_destination.display())
+        }
+        PlannedArchiveDestination::StandaloneTool => {
+            format!("Managed tool/{}", item.relative_destination.display())
+        }
+    }
+}
+
+fn build_review_items(items: &[PlannedArchiveItem]) -> Vec<InstallReviewItem> {
+    items
+        .iter()
         .map(|item| InstallReviewItem {
             source_path: item.from.display().to_string(),
-            proposed_destination: match item.destination {
-                PlannedArchiveDestination::ObsPluginBin => {
-                    format!("OBS plugin bin/{}", item.relative_destination.display())
-                }
-                PlannedArchiveDestination::ObsPluginData => {
-                    format!("OBS plugin data/{}", item.relative_destination.display())
-                }
-                PlannedArchiveDestination::StandaloneTool => {
-                    format!("Managed tool/{}", item.relative_destination.display())
-                }
-            },
+            proposed_destination: planned_destination_label(item),
             reason: item.reason.clone(),
         })
         .collect()
@@ -633,7 +653,12 @@ fn collect_archive_candidates(
     root: &Path,
     plugin: &PluginCatalogEntry,
     platform: &SupportedPlatform,
-) -> (Vec<CandidateFile>, Vec<CandidateFile>, Vec<CandidateFile>, PathBuf) {
+) -> (
+    Vec<CandidateFile>,
+    Vec<CandidateFile>,
+    Vec<CandidateFile>,
+    PathBuf,
+) {
     let scan_root = preferred_payload_root(root);
     let name_hints = plugin_name_hints(plugin);
     let resource_hints = plugin_resource_hints(plugin);
@@ -748,7 +773,7 @@ fn heuristic_obs_plugin_plan(
         InstallReviewDetectedKind::ObsPlugin,
         summary.clone(),
         "Review the proposed destinations below or continue with the official source page if anything looks unexpected.",
-        build_obs_review_items(&items),
+        build_review_items(&items),
     );
 
     Some(PlannedArchiveInstall {
@@ -817,7 +842,7 @@ fn heuristic_standalone_plan(
             plugin.name
         ),
         "Review the managed tool files below or open the official source page if you want to verify the upstream instructions first.",
-        build_obs_review_items(&items),
+        build_review_items(&items),
     );
 
     Some(PlannedArchiveInstall {
@@ -908,7 +933,12 @@ pub fn inspect_archive_install(
         .and_then(|strategy| strategy.kind.as_ref());
 
     if strategy_kind == Some(&PluginInstallStrategyKind::Hybrid) {
-        return Ok(heuristic_review_plan(plugin, &obs_binaries, &resources, &standalone));
+        return Ok(heuristic_review_plan(
+            plugin,
+            &obs_binaries,
+            &resources,
+            &standalone,
+        ));
     }
 
     if strategy_kind == Some(&PluginInstallStrategyKind::StandaloneTool) {
@@ -935,7 +965,236 @@ pub fn inspect_archive_install(
         }
     }
 
-    Ok(heuristic_review_plan(plugin, &obs_binaries, &resources, &standalone))
+    Ok(heuristic_review_plan(
+        plugin,
+        &obs_binaries,
+        &resources,
+        &standalone,
+    ))
+}
+
+fn theme_descriptor_label(relative: &Path) -> &'static str {
+    match relative
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "qss" => "Theme stylesheet file",
+        "obt" => "OBS theme preset file",
+        "ovt" => "OBS theme variant file",
+        _ => "Theme descriptor file",
+    }
+}
+
+fn is_theme_descriptor_file(relative: &Path) -> bool {
+    matches!(
+        relative
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
+        "qss" | "obt" | "ovt"
+    )
+}
+
+fn is_theme_asset_file(relative: &Path) -> bool {
+    matches!(
+        relative
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
+        "png"
+            | "jpg"
+            | "jpeg"
+            | "gif"
+            | "svg"
+            | "bmp"
+            | "webp"
+            | "ttf"
+            | "otf"
+            | "woff"
+            | "woff2"
+            | "cur"
+            | "ico"
+    )
+}
+
+fn is_disallowed_theme_file(path: &Path, relative: &Path) -> bool {
+    let extension = relative
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+
+    matches!(
+        extension.as_str(),
+        "exe"
+            | "dll"
+            | "so"
+            | "dylib"
+            | "msi"
+            | "pkg"
+            | "deb"
+            | "rpm"
+            | "appimage"
+            | "bat"
+            | "cmd"
+            | "com"
+            | "sh"
+            | "ps1"
+            | "py"
+            | "lua"
+            | "jar"
+            | "zip"
+            | "tar"
+            | "gz"
+            | "xz"
+            | "7z"
+    ) || is_unix_executable_file(path)
+}
+
+fn theme_review_item(path: &Path, relative: &Path, reason: impl Into<String>) -> InstallReviewItem {
+    InstallReviewItem {
+        source_path: path.display().to_string(),
+        proposed_destination: format!("OBS theme folder/{}", relative.display()),
+        reason: reason.into(),
+    }
+}
+
+fn theme_review_plan(
+    summary: impl Into<String>,
+    items: Vec<InstallReviewItem>,
+) -> PlannedArchiveInstall {
+    PlannedArchiveInstall {
+        kind: PlannedArchiveKind::Review,
+        items: Vec::new(),
+        review_plan: build_review_plan(
+            InstallReviewDetectedKind::Ambiguous,
+            summary,
+            "Review the detected theme files below, then open the official source page if the package needs manual theme install steps.",
+            items,
+        ),
+    }
+}
+
+pub fn inspect_theme_archive_install(
+    root: &Path,
+    plugin: &PluginCatalogEntry,
+) -> Result<PlannedArchiveInstall, AppError> {
+    let scan_root = preferred_payload_root(root);
+    let mut planned_items = Vec::new();
+    let mut rejected_items = Vec::new();
+    let mut found_root_descriptor = false;
+
+    for entry in WalkDir::new(&scan_root)
+        .max_depth(8)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().is_file())
+    {
+        let path = entry.path().to_path_buf();
+        let Ok(relative) = path.strip_prefix(&scan_root).map(PathBuf::from) else {
+            continue;
+        };
+
+        if is_documentation_file(&relative) {
+            continue;
+        }
+
+        if is_theme_descriptor_file(&relative) {
+            if relative.components().count() == 1 {
+                found_root_descriptor = true;
+            }
+
+            planned_items.push(PlannedArchiveItem {
+                from: path,
+                relative_destination: relative.clone(),
+                destination: PlannedArchiveDestination::ObsTheme,
+                reason: theme_descriptor_label(&relative).to_string(),
+            });
+            continue;
+        }
+
+        if is_theme_asset_file(&relative) {
+            planned_items.push(PlannedArchiveItem {
+                from: path,
+                relative_destination: relative.clone(),
+                destination: PlannedArchiveDestination::ObsTheme,
+                reason: "Theme asset/support file".to_string(),
+            });
+            continue;
+        }
+
+        let reason = if is_disallowed_theme_file(&path, &relative) {
+            "Executables, installers, scripts, and nested archives are not allowed in OBS theme packages."
+        } else {
+            "Unsupported file type for a safe OBS theme install."
+        };
+        rejected_items.push(theme_review_item(&path, &relative, reason));
+    }
+
+    if planned_items.is_empty() {
+        return Ok(theme_review_plan(
+            format!(
+                "Could not verify theme layout for {}. No recognized OBS theme files were found in the archive.",
+                plugin.name
+            ),
+            rejected_items,
+        ));
+    }
+
+    let mut review_items = rejected_items;
+    if review_items.len() < 12 {
+        review_items.extend(
+            build_review_items(&planned_items)
+                .into_iter()
+                .take(12 - review_items.len()),
+        );
+    }
+
+    if !found_root_descriptor {
+        return Ok(theme_review_plan(
+            format!(
+                "This archive looks like an OBS theme package, but no theme file (.qss, .obt, or .ovt) was found at the package root."
+            ),
+            review_items,
+        ));
+    }
+
+    if !review_items.is_empty()
+        && review_items.iter().any(|item| {
+            item.reason.contains("Unsupported file type")
+                || item.reason.contains("not allowed in OBS theme packages")
+        })
+    {
+        return Ok(theme_review_plan(
+            format!(
+                "This archive looks like an OBS theme package, but some files do not match the safe theme layout for {}.",
+                plugin.name
+            ),
+            review_items,
+        ));
+    }
+
+    Ok(PlannedArchiveInstall {
+        kind: PlannedArchiveKind::ThemeBundle,
+        items: planned_items.clone(),
+        review_plan: build_review_plan(
+            InstallReviewDetectedKind::Ambiguous,
+            format!(
+                "This archive looks like an OBS theme package. {} files will be installed into the OBS theme folder for {}.",
+                planned_items.len(),
+                plugin.name
+            ),
+            "Review the proposed theme destinations below or continue with the official source page if anything looks unexpected.",
+            build_review_items(&planned_items),
+        ),
+    })
 }
 
 pub fn build_planned_install_operations(
@@ -961,6 +1220,7 @@ pub fn build_planned_install_operations(
                 .join(&plugin.module_name)
                 .join("data")
                 .join(&item.relative_destination),
+            PlannedArchiveDestination::ObsTheme => target_root.join(&item.relative_destination),
             PlannedArchiveDestination::StandaloneTool => {
                 target_root.join(&item.relative_destination)
             }
@@ -1113,4 +1373,139 @@ pub fn build_install_operations(
     }
 
     Ok(operations)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    use crate::models::plugin::{
+        PluginCatalogEntry, PluginPackageInstallType, ResourceInstallType, SupportedPlatform,
+    };
+
+    fn theme_plugin() -> PluginCatalogEntry {
+        PluginCatalogEntry {
+            id: "amoled-theme".to_string(),
+            module_name: "amoled-theme".to_string(),
+            name: "AMOLED Theme".to_string(),
+            tagline: "Test theme".to_string(),
+            description: "Test theme".to_string(),
+            long_description: "Test theme".to_string(),
+            author: "Tester".to_string(),
+            version: "1.0.0".to_string(),
+            supported_platforms: vec![
+                SupportedPlatform::Windows,
+                SupportedPlatform::Macos,
+                SupportedPlatform::Linux,
+            ],
+            supported_obs_versions: "28+".to_string(),
+            min_obs_version: "28.0.0".to_string(),
+            max_obs_version: None,
+            category: "Themes".to_string(),
+            homepage_url: "https://example.com/theme".to_string(),
+            source_url: None,
+            official_obs_url: None,
+            github_url: None,
+            release_url: None,
+            github_repo: None,
+            github_release_url: None,
+            github_release_tag: None,
+            updated_at: None,
+            resource_install_type: Some(ResourceInstallType::ThemeBundle),
+            install_type: Some("guide".to_string()),
+            package_type: None,
+            file_type: None,
+            resource_type: Some("theme".to_string()),
+            verified_source: None,
+            download_count_raw: None,
+            github_stars: None,
+            search_tags: Vec::new(),
+            preferred_asset_patterns: Vec::new(),
+            fallback_install_type: Some(PluginPackageInstallType::Guide),
+            icon_key: "effects".to_string(),
+            icon_url: None,
+            screenshots: Vec::new(),
+            install_notes: Vec::new(),
+            verified: true,
+            featured: false,
+            guide_only: false,
+            download_button_present: true,
+            manual_install_url: Some("https://example.com/theme.zip".to_string()),
+            managed_extract_path: None,
+            primary_entry_files: Vec::new(),
+            install_instructions: Vec::new(),
+            obs_followup_steps: Vec::new(),
+            setup_actions: Vec::new(),
+            status_note: None,
+            last_updated: "2026-03-19".to_string(),
+            download_count: "0".to_string(),
+            accent_from: "#000000".to_string(),
+            accent_to: "#111111".to_string(),
+            install_strategy: None,
+            packages: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn theme_archives_install_when_layout_is_clear() {
+        let plugin = theme_plugin();
+        let archive_root = tempdir().expect("tempdir");
+        let theme_dir = archive_root.path().join("AMOLED");
+        fs::create_dir_all(&theme_dir).expect("create theme dir");
+        fs::write(archive_root.path().join("AMOLED.qss"), "QWidget {}").expect("write qss");
+        fs::write(theme_dir.join("bot_hook.png"), "png").expect("write asset");
+
+        let plan = inspect_theme_archive_install(archive_root.path(), &plugin).expect("inspect");
+
+        assert_eq!(plan.kind, PlannedArchiveKind::ThemeBundle);
+        assert_eq!(plan.items.len(), 2);
+
+        let target_root = tempdir().expect("target tempdir");
+        let operations =
+            build_planned_install_operations(&plan, &plugin, target_root.path()).expect("ops");
+
+        assert_eq!(operations.len(), 2);
+        assert!(operations
+            .iter()
+            .any(|operation| operation.to == target_root.path().join("AMOLED.qss")));
+        assert!(operations.iter().any(|operation| {
+            operation.to == target_root.path().join("AMOLED").join("bot_hook.png")
+        }));
+    }
+
+    #[test]
+    fn theme_archives_require_a_root_theme_descriptor() {
+        let plugin = theme_plugin();
+        let archive_root = tempdir().expect("tempdir");
+        let theme_dir = archive_root.path().join("AMOLED");
+        fs::create_dir_all(&theme_dir).expect("create theme dir");
+        fs::write(theme_dir.join("bot_hook.png"), "png").expect("write asset");
+
+        let plan = inspect_theme_archive_install(archive_root.path(), &plugin).expect("inspect");
+
+        assert_eq!(plan.kind, PlannedArchiveKind::Review);
+        assert!(plan
+            .review_plan
+            .summary
+            .contains("no theme file (.qss, .obt, or .ovt)"));
+    }
+
+    #[test]
+    fn theme_archives_fall_back_to_review_for_unsafe_files() {
+        let plugin = theme_plugin();
+        let archive_root = tempdir().expect("tempdir");
+        fs::write(archive_root.path().join("AMOLED.qss"), "QWidget {}").expect("write qss");
+        fs::write(archive_root.path().join("setup.exe"), "binary").expect("write exe");
+
+        let plan = inspect_theme_archive_install(archive_root.path(), &plugin).expect("inspect");
+
+        assert_eq!(plan.kind, PlannedArchiveKind::Review);
+        assert!(plan.review_plan.summary.contains("safe theme layout"));
+        assert!(plan
+            .review_plan
+            .items
+            .iter()
+            .any(|item| { item.reason.contains("not allowed in OBS theme packages") }));
+    }
 }

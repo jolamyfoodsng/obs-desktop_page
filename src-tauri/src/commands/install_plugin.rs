@@ -15,12 +15,13 @@ use tauri::{AppHandle, Emitter, Manager};
 use tempfile::Builder;
 use walkdir::WalkDir;
 
+use crate::commands::detect_obs::apply_saved_install_scope;
 use crate::commands::extract_archive::extract_archive;
 use crate::commands::plugin_paths::{
     build_install_operations, build_planned_install_operations, detect_archive_layout,
-    inspect_archive_install, ArchiveLayout, InstallCopyOperation, PlannedArchiveKind,
+    inspect_archive_install, inspect_theme_archive_install, ArchiveLayout, InstallCopyOperation,
+    PlannedArchiveKind,
 };
-use crate::commands::detect_obs::apply_saved_install_scope;
 use crate::commands::store::{load_state, push_install_history, save_state};
 use crate::commands::validate_obs::validate_obs_path;
 use crate::models::plugin::{
@@ -29,8 +30,8 @@ use crate::models::plugin::{
 };
 use crate::models::state::{
     CancelInstallResponse, GitHubRejectedAsset, GitHubReleaseAssetOption, GitHubReleaseInfo,
-    InstallBackupRecord, InstallHistoryAction, InstallHistoryEntry, InstallKind,
-    InstallMethod, InstallProgressEvent, InstallRequest, InstallResponse, InstallReviewPlan,
+    InstallBackupRecord, InstallHistoryAction, InstallHistoryEntry, InstallKind, InstallMethod,
+    InstallProgressEvent, InstallRequest, InstallResponse, InstallReviewPlan,
     InstallVerificationStatus, InstalledPluginRecord, InstalledPluginSourceType,
     InstalledPluginStatus,
 };
@@ -212,7 +213,11 @@ fn failure_response(
     }
 }
 
-fn canceled_response(plugin_id: &str, message: impl Into<String>, app: &AppHandle) -> InstallResponse {
+fn canceled_response(
+    plugin_id: &str,
+    message: impl Into<String>,
+    app: &AppHandle,
+) -> InstallResponse {
     let message = message.into();
     emit_progress(
         app,
@@ -242,10 +247,7 @@ fn canceled_response(plugin_id: &str, message: impl Into<String>, app: &AppHandl
     }
 }
 
-fn check_canceled(
-    token: &Arc<AtomicBool>,
-    message: &str,
-) -> Result<(), AppError> {
+fn check_canceled(token: &Arc<AtomicBool>, message: &str) -> Result<(), AppError> {
     if token.load(Ordering::SeqCst) {
         Err(AppError::canceled(message))
     } else {
@@ -531,7 +533,11 @@ fn platform_display_name(platform: &SupportedPlatform) -> &'static str {
 }
 
 fn platform_target_label(platform: &SupportedPlatform) -> String {
-    format!("{} {}", platform_display_name(platform), current_arch_label())
+    format!(
+        "{} {}",
+        platform_display_name(platform),
+        current_arch_label()
+    )
 }
 
 fn infer_file_type(filename: &str, content_type: Option<&str>) -> Option<PluginPackageFileType> {
@@ -610,27 +616,32 @@ fn is_probable_source_archive(filename: &str) -> bool {
             || lower.ends_with(".tar.xz"))
 }
 
-fn target_platform_tokens(platform: &SupportedPlatform) -> (&'static [&'static str], &'static [&'static str]) {
+fn target_platform_tokens(
+    platform: &SupportedPlatform,
+) -> (&'static [&'static str], &'static [&'static str]) {
     match platform {
         SupportedPlatform::Windows => (
             &["windows", "win", "win64", "win32", "msvc"],
-            &["mac", "macos", "osx", "darwin", "linux", "ubuntu", "deb", "rpm", "appimage"],
+            &[
+                "mac", "macos", "osx", "darwin", "linux", "ubuntu", "deb", "rpm", "appimage",
+            ],
         ),
         SupportedPlatform::Macos => (
             &["mac", "macos", "osx", "darwin", "universal"],
-            &["windows", "win", "linux", "ubuntu", "deb", "rpm", "appimage"],
+            &[
+                "windows", "win", "linux", "ubuntu", "deb", "rpm", "appimage",
+            ],
         ),
         SupportedPlatform::Linux => (
             &["linux", "appimage", "deb", "rpm", "ubuntu"],
-            &["windows", "win", "mac", "macos", "osx", "darwin", "pkg", "dmg"],
+            &[
+                "windows", "win", "mac", "macos", "osx", "darwin", "pkg", "dmg",
+            ],
         ),
     }
 }
 
-fn native_file_type_score(
-    platform: &SupportedPlatform,
-    file_type: &PluginPackageFileType,
-) -> i32 {
+fn native_file_type_score(platform: &SupportedPlatform, file_type: &PluginPackageFileType) -> i32 {
     match platform {
         SupportedPlatform::Windows => match file_type {
             PluginPackageFileType::Msi => 95,
@@ -662,12 +673,13 @@ fn score_github_asset(
     asset: &GitHubApiAsset,
     platform: &SupportedPlatform,
 ) -> Result<GitHubReleaseAssetOption, GitHubRejectedAsset> {
-    let file_type = infer_file_type(&asset.name, asset.content_type.as_deref()).ok_or_else(|| {
-        GitHubRejectedAsset {
-            name: asset.name.clone(),
-            reason: "unsupported file type".to_string(),
-        }
-    })?;
+    let file_type =
+        infer_file_type(&asset.name, asset.content_type.as_deref()).ok_or_else(|| {
+            GitHubRejectedAsset {
+                name: asset.name.clone(),
+                reason: "unsupported file type".to_string(),
+            }
+        })?;
 
     if is_probable_source_archive(&asset.name) {
         return Err(GitHubRejectedAsset {
@@ -701,7 +713,11 @@ fn score_github_asset(
         score += 24;
         reasons.push(format!("matched {}", current_arch_label()));
     } else if lower.contains("arm64") || lower.contains("aarch64") {
-        score -= if current_arch_label() == "arm64" { 0 } else { 35 };
+        score -= if current_arch_label() == "arm64" {
+            0
+        } else {
+            35
+        };
     } else if lower.contains("x64") || lower.contains("x86_64") || lower.contains("amd64") {
         score -= if current_arch_label() == "x64" { 0 } else { 18 };
     }
@@ -748,7 +764,11 @@ fn score_github_asset(
     }
     .to_string();
     let reason = if reasons.is_empty() {
-        format!("best match for {} {}", platform.as_str(), current_arch_label())
+        format!(
+            "best match for {} {}",
+            platform.as_str(),
+            current_arch_label()
+        )
     } else {
         format!(
             "best match for {} {}: {}",
@@ -776,7 +796,9 @@ fn github_client() -> Result<Client, AppError> {
         .map_err(Into::into)
 }
 
-fn fetch_github_release_info(plugin: &PluginCatalogEntry) -> Result<Option<GitHubReleaseInfo>, AppError> {
+fn fetch_github_release_info(
+    plugin: &PluginCatalogEntry,
+) -> Result<Option<GitHubReleaseInfo>, AppError> {
     let Some(repo) = infer_github_repo(plugin) else {
         return Ok(None);
     };
@@ -789,7 +811,12 @@ fn fetch_github_release_info(plugin: &PluginCatalogEntry) -> Result<Option<GitHu
         format!("https://api.github.com/repos/{repo_string}/releases/latest")
     };
 
-    log::info!("github release fetched: plugin={} repo={} url={}", plugin.id, repo_string, api_url);
+    log::info!(
+        "github release fetched: plugin={} repo={} url={}",
+        plugin.id,
+        repo_string,
+        api_url
+    );
 
     let release = github_client()?
         .get(api_url)
@@ -902,10 +929,9 @@ fn resolve_github_asset_for_install(
                 asset.name,
                 asset.reason
             );
-            return Ok(GitHubSelectionResolution::Selected(GitHubInstallSelection {
-                release,
-                asset,
-            }));
+            return Ok(GitHubSelectionResolution::Selected(
+                GitHubInstallSelection { release, asset },
+            ));
         }
 
         return Ok(GitHubSelectionResolution::Unavailable {
@@ -916,18 +942,16 @@ fn resolve_github_asset_for_install(
     }
 
     if let Some(asset) = release.selected_asset.clone() {
-        return Ok(GitHubSelectionResolution::Selected(GitHubInstallSelection {
-            release,
-            asset,
-        }));
+        return Ok(GitHubSelectionResolution::Selected(
+            GitHubInstallSelection { release, asset },
+        ));
     }
 
     let target_label = platform_target_label(&SupportedPlatform::current());
     let only_source_or_non_installable = !release.rejected_assets.is_empty()
-        && release
-            .rejected_assets
-            .iter()
-            .all(|asset| asset.reason.contains("source-code archive") || asset.reason.contains("unsupported"));
+        && release.rejected_assets.iter().all(|asset| {
+            asset.reason.contains("source-code archive") || asset.reason.contains("unsupported")
+        });
 
     let message = if release.rejected_assets.is_empty() {
         format!(
@@ -1328,22 +1352,68 @@ fn ensure_managed_tools_directory(app: &AppHandle) -> Result<PathBuf, AppError> 
     Ok(tools_dir)
 }
 
+fn is_theme_resource(plugin: &PluginCatalogEntry) -> bool {
+    plugin.resource_type.as_deref() == Some("theme")
+        || plugin.category.eq_ignore_ascii_case("themes")
+        || matches!(
+            plugin.resource_install_type,
+            Some(ResourceInstallType::ThemeBundle)
+        )
+}
+
+pub(crate) fn managed_theme_root(
+    selected_obs_path: &Path,
+    validation_kind: &str,
+) -> Result<PathBuf, AppError> {
+    let themes_root = if validation_kind == "windows-portable" {
+        selected_obs_path
+            .join("data")
+            .join("obs-studio")
+            .join("themes")
+    } else if validation_kind == "linux-flatpak" {
+        selected_obs_path
+            .join("config")
+            .join("obs-studio")
+            .join("themes")
+    } else {
+        dirs::config_dir()
+            .ok_or_else(|| AppError::message("Could not resolve the system config directory."))?
+            .join("obs-studio")
+            .join("themes")
+    };
+
+    fs::create_dir_all(&themes_root)?;
+    Ok(themes_root)
+}
+
 fn requires_post_install_setup(plugin: &PluginCatalogEntry) -> bool {
     !plugin.obs_followup_steps.is_empty()
         || matches!(
             plugin.resource_install_type,
             Some(ResourceInstallType::BrowserSourceBundle)
                 | Some(ResourceInstallType::DockBundle)
-                | Some(ResourceInstallType::ThemeBundle)
                 | Some(ResourceInstallType::ZipExtract)
         )
+}
+
+fn build_theme_install_message(theme_root: &Path, plugin: &PluginCatalogEntry) -> String {
+    format!(
+        "{} was installed into the OBS theme folder at {}. Open OBS Settings -> General -> Theme to select it.",
+        plugin.name,
+        theme_root.display()
+    )
 }
 
 fn resolve_primary_entry_paths(plugin: &PluginCatalogEntry, install_root: &Path) -> Vec<String> {
     plugin
         .primary_entry_files
         .iter()
-        .map(|entry| install_root.join(&entry.relative_path).display().to_string())
+        .map(|entry| {
+            install_root
+                .join(&entry.relative_path)
+                .display()
+                .to_string()
+        })
         .collect()
 }
 
@@ -1569,10 +1639,7 @@ fn ensure_backup_root(app: &AppHandle, plugin_id: &str) -> Result<PathBuf, AppEr
     Ok(backup_root)
 }
 
-fn backup_existing_target(
-    backup_root: &Path,
-    entry: &CopyEntry,
-) -> Result<BackupEntry, AppError> {
+fn backup_existing_target(backup_root: &Path, entry: &CopyEntry) -> Result<BackupEntry, AppError> {
     let backup_path = backup_root.join(&entry.relative_target);
 
     if let Some(parent) = backup_path.parent() {
@@ -1709,7 +1776,9 @@ fn infer_install_history_action(
         Some(previous) if previous.status == InstalledPluginStatus::MissingFiles => {
             InstallHistoryAction::Repair
         }
-        Some(previous) if previous.installed_version != plugin_version => InstallHistoryAction::Update,
+        Some(previous) if previous.installed_version != plugin_version => {
+            InstallHistoryAction::Update
+        }
         Some(_) => InstallHistoryAction::Repair,
     }
 }
@@ -1946,7 +2015,10 @@ fn verify_downloaded_installer(download_path: &Path) -> Result<(), AppError> {
     Ok(())
 }
 
-fn launch_windows_installer(download_path: &Path, file_type: &PluginPackageFileType) -> Result<(), AppError> {
+fn launch_windows_installer(
+    download_path: &Path,
+    file_type: &PluginPackageFileType,
+) -> Result<(), AppError> {
     #[cfg(target_os = "windows")]
     {
         use std::process::{Command, Stdio};
@@ -2214,10 +2286,7 @@ fn finalize_archive_download(
         .unwrap_or(archive_path)
         .join("extracted");
 
-    check_canceled(
-        token,
-        "The install was canceled before extraction started.",
-    )?;
+    check_canceled(token, "The install was canceled before extraction started.")?;
 
     emit_progress(
         app,
@@ -2225,7 +2294,11 @@ fn finalize_archive_download(
         "extracting",
         56,
         format!("Extracting {}", plugin.name),
-        Some("Unpacking the archive into a temporary workspace.".to_string()),
+        Some(if is_theme_resource(plugin) {
+            "Unpacking the theme archive into a temporary workspace.".to_string()
+        } else {
+            "Unpacking the archive into a temporary workspace.".to_string()
+        }),
         false,
     );
 
@@ -2244,7 +2317,12 @@ fn finalize_archive_download(
         "inspecting",
         66,
         format!("Inspecting {}", plugin.name),
-        Some("Checking the package structure before anything is copied.".to_string()),
+        Some(if is_theme_resource(plugin) {
+            "Checking whether the archive matches a safe OBS theme layout before anything is copied."
+                    .to_string()
+        } else {
+            "Checking the package structure before anything is copied.".to_string()
+        }),
         false,
     );
 
@@ -2253,7 +2331,63 @@ fn finalize_archive_download(
         "The install was canceled while inspecting the package.",
     )?;
 
-    if let Ok(layout) = detect_archive_layout(&extracted_path, plugin, &SupportedPlatform::current())
+    if is_theme_resource(plugin) {
+        let resolved_obs = match resolved_obs_location(app, plugin) {
+            Ok(resolved_obs) => resolved_obs,
+            Err(response) => return Ok(response),
+        };
+        let theme_root =
+            managed_theme_root(&resolved_obs.selected_path, &resolved_obs.validation_kind)?;
+        let planned = inspect_theme_archive_install(&extracted_path, plugin)?;
+
+        return match planned.kind {
+            PlannedArchiveKind::ThemeBundle => {
+                log::info!(
+                    "theme archive accepted: plugin={} destination={} files={}",
+                    plugin.id,
+                    theme_root.display(),
+                    planned.items.len()
+                );
+                let operations =
+                    build_planned_install_operations(&planned, plugin, &theme_root)?;
+                finalize_theme_archive_install(
+                    app,
+                    plugin,
+                    operations,
+                    &theme_root,
+                    overwrite,
+                    package_id,
+                    token,
+                )
+            }
+            PlannedArchiveKind::Review => {
+                let summary = planned.review_plan.summary.clone();
+                log::info!(
+                    "theme archive requires review: plugin={} summary={}",
+                    plugin.id,
+                    summary
+                );
+                Ok(review_response(
+                    &plugin.id,
+                    summary,
+                    planned.review_plan,
+                    app,
+                ))
+            }
+            _ => Ok(review_response(
+                &plugin.id,
+                format!(
+                    "Could not verify theme layout for {}. Open the official source page to review the package manually.",
+                    plugin.name
+                ),
+                planned.review_plan,
+                app,
+            )),
+        };
+    }
+
+    if let Ok(layout) =
+        detect_archive_layout(&extracted_path, plugin, &SupportedPlatform::current())
     {
         if let ArchiveLayout::StandaloneTool { source_root } = &layout {
             return finalize_standalone_tool_install(
@@ -2314,10 +2448,28 @@ fn finalize_archive_download(
                 token,
             )
         }
+        PlannedArchiveKind::ThemeBundle => {
+            let resolved_obs = match resolved_obs_location(app, plugin) {
+                Ok(resolved_obs) => resolved_obs,
+                Err(response) => return Ok(response),
+            };
+            let theme_root =
+                managed_theme_root(&resolved_obs.selected_path, &resolved_obs.validation_kind)?;
+            let operations = build_planned_install_operations(&planned, plugin, &theme_root)?;
+
+            finalize_theme_archive_install(
+                app,
+                plugin,
+                operations,
+                &theme_root,
+                overwrite,
+                package_id,
+                token,
+            )
+        }
         PlannedArchiveKind::StandaloneTool => {
             let install_root = ensure_managed_tools_directory(app)?.join(&plugin.module_name);
-            let operations =
-                build_planned_install_operations(&planned, plugin, &install_root)?;
+            let operations = build_planned_install_operations(&planned, plugin, &install_root)?;
 
             finalize_standalone_operations_install(
                 app,
@@ -2336,6 +2488,140 @@ fn finalize_archive_download(
             app,
         )),
     }
+}
+
+fn finalize_theme_archive_install(
+    app: &AppHandle,
+    plugin: &PluginCatalogEntry,
+    operations: Vec<InstallCopyOperation>,
+    theme_root: &Path,
+    overwrite: bool,
+    package_id: Option<String>,
+    token: &Arc<AtomicBool>,
+) -> Result<InstallResponse, AppError> {
+    let success_message = build_theme_install_message(theme_root, plugin);
+    let entries = collect_copy_entries(&operations, theme_root)?;
+    let copy_outcome = match copy_entries(
+        app,
+        plugin,
+        &entries,
+        overwrite,
+        "the OBS theme folder",
+        token,
+    ) {
+        Ok(copy_outcome) => copy_outcome,
+        Err(response) => return Ok(response),
+    };
+    if let Err(response) = cancel_after_copy(
+        app,
+        plugin,
+        &copy_outcome,
+        token,
+        "The install was canceled before verification completed.",
+    ) {
+        return Ok(response);
+    }
+    if let Err(missing_files) = verify_copy_session(&entries) {
+        let rollback_issues = rollback_copy_session(&copy_outcome);
+        return Ok(failure_response(
+            &plugin.id,
+            "INSTALL_VERIFY_FAILED",
+            build_rollback_message(
+                &format!(
+                    "The theme install finished copying files, but verification failed. Missing files: {}",
+                    missing_files.join(", ")
+                ),
+                &rollback_issues,
+            ),
+            app,
+        ));
+    }
+    if let Err(response) = cancel_after_copy(
+        app,
+        plugin,
+        &copy_outcome,
+        token,
+        "The install was canceled before it was finalized.",
+    ) {
+        return Ok(response);
+    }
+
+    let mut state = load_state(app)?;
+    let previous_record = state.installed_plugins.get(&plugin.id).cloned();
+    let installed_plugin = InstalledPluginRecord {
+        plugin_id: plugin.id.clone(),
+        installed_version: plugin.version.clone(),
+        installed_at: Utc::now().to_rfc3339(),
+        managed: true,
+        install_location: theme_root.display().to_string(),
+        installed_files: copy_outcome.tracked_files.clone(),
+        status: InstalledPluginStatus::Installed,
+        source_type: InstalledPluginSourceType::Archive,
+        install_kind: InstallKind::Full,
+        package_id,
+        download_path: None,
+        install_method: Some(InstallMethod::Managed),
+        backup: build_install_backup_record(&copy_outcome),
+        verification_status: Some(InstallVerificationStatus::Verified),
+        last_verified_at: Some(Utc::now().to_rfc3339()),
+    };
+    push_install_history(
+        &mut state,
+        InstallHistoryEntry {
+            plugin_id: plugin.id.clone(),
+            plugin_name: plugin.name.clone(),
+            version: Some(plugin.version.clone()),
+            action: infer_install_history_action(previous_record.as_ref(), &plugin.version),
+            managed: true,
+            install_location: Some(theme_root.display().to_string()),
+            message: "Managed OBS theme install completed and verification passed.".to_string(),
+            timestamp: Utc::now().to_rfc3339(),
+            file_count: copy_outcome.tracked_files.len(),
+            backup_root: installed_plugin
+                .backup
+                .as_ref()
+                .map(|backup| backup.backup_root.clone()),
+            verification_status: Some(InstallVerificationStatus::Verified),
+        },
+    );
+    state
+        .installed_plugins
+        .insert(plugin.id.clone(), installed_plugin.clone());
+    save_state(app, &state)?;
+    cleanup_previous_backup(
+        previous_record.as_ref(),
+        installed_plugin
+            .backup
+            .as_ref()
+            .map(|backup| backup.backup_root.as_str()),
+    );
+
+    emit_progress(
+        app,
+        &plugin.id,
+        "completed",
+        100,
+        format!("{} installed successfully", plugin.name),
+        Some(success_message.clone()),
+        true,
+    );
+
+    Ok(InstallResponse {
+        success: true,
+        code: None,
+        message: success_message,
+        installed_plugin: Some(installed_plugin),
+        manual_installer_path: None,
+        download_path: None,
+        installer_started: false,
+        can_open_installer_manually: false,
+        requires_restart: false,
+        conflicts: None,
+        review_plan: None,
+        selected_asset_name: None,
+        selected_asset_reason: None,
+        github_release_url: None,
+    })
 }
 
 fn finalize_obs_archive_install(
@@ -2907,7 +3193,13 @@ fn install_github_release_asset(
                 .prefix(&format!("obs-plugin-installer-{}-", plugin.id))
                 .tempdir_in(temp_root)?;
             let archive_path = working_dir.path().join(&selection.asset.name);
-            download_url(app, plugin, &selection.asset.download_url, &archive_path, token)?;
+            download_url(
+                app,
+                plugin,
+                &selection.asset.download_url,
+                &archive_path,
+                token,
+            )?;
             finalize_archive_download(
                 app,
                 plugin,
@@ -2921,7 +3213,13 @@ fn install_github_release_asset(
         PluginPackageInstallType::External => {
             let downloads_dir = ensure_download_directory(app)?;
             let download_path = downloads_dir.join(&selection.asset.name);
-            download_url(app, plugin, &selection.asset.download_url, &download_path, token)?;
+            download_url(
+                app,
+                plugin,
+                &selection.asset.download_url,
+                &download_path,
+                token,
+            )?;
             cancel_before_opening_download(token, &download_path)?;
             let (label, _, _) = external_install_guidance(Some(&selection.asset.file_type));
             finalize_external_download(
@@ -2933,17 +3231,15 @@ fn install_github_release_asset(
                 Some(&selection.asset.file_type),
             )?
         }
-        PluginPackageInstallType::Guide => {
-            failure_response(
-                &plugin.id,
-                "MANUAL_ONLY",
-                format!(
-                    "{} did not expose an installable binary in its selected GitHub release asset.",
-                    plugin.name
-                ),
-                app,
-            )
-        }
+        PluginPackageInstallType::Guide => failure_response(
+            &plugin.id,
+            "MANUAL_ONLY",
+            format!(
+                "{} did not expose an installable binary in its selected GitHub release asset.",
+                plugin.name
+            ),
+            app,
+        ),
     };
 
     Ok(attach_github_metadata(
@@ -3057,7 +3353,15 @@ fn install_resource_import(
                 &archive_path,
                 token,
             )?;
-            finalize_archive_download(app, plugin, &archive_path, &file_type, overwrite, None, token)
+            finalize_archive_download(
+                app,
+                plugin,
+                &archive_path,
+                &file_type,
+                overwrite,
+                None,
+                token,
+            )
         }
         ResolvedResourceKind::Script => {
             let temp_root = app.path().temp_dir()?;
@@ -3065,14 +3369,7 @@ fn install_resource_import(
                 .prefix(&format!("obs-plugin-installer-{}-", plugin.id))
                 .tempdir_in(temp_root)?;
             let script_path = working_dir.path().join(&filename);
-            write_download_response(
-                app,
-                &plugin.id,
-                &plugin.name,
-                response,
-                &script_path,
-                token,
-            )?;
+            write_download_response(app, &plugin.id, &plugin.name, response, &script_path, token)?;
             install_script_file(app, plugin, &script_path, &filename, overwrite, token)
         }
     }
@@ -3202,15 +3499,13 @@ fn do_install_plugin(
             github_release_url: None,
         }),
         PluginPackageInstallType::External => install_external_package(app, plugin, package, token),
-        PluginPackageInstallType::Archive => {
-            install_archive_package(
-                app,
-                plugin,
-                package,
-                request.overwrite.unwrap_or(false),
-                token,
-            )
-        }
+        PluginPackageInstallType::Archive => install_archive_package(
+            app,
+            plugin,
+            package,
+            request.overwrite.unwrap_or(false),
+            token,
+        ),
     }
 }
 
@@ -3251,7 +3546,8 @@ pub fn cancel_plugin_install(
     Ok(CancelInstallResponse {
         canceled,
         message: if canceled {
-            "Cancellation requested. OBS Plugin Installer will stop this install safely.".to_string()
+            "Cancellation requested. OBS Plugin Installer will stop this install safely."
+                .to_string()
         } else {
             "No active install was found for that plugin.".to_string()
         },
@@ -3267,10 +3563,11 @@ pub async fn get_github_release_info(
         let plugin = catalog
             .iter()
             .find(|plugin| plugin.id == plugin_id)
-            .ok_or_else(|| "The requested plugin is not part of the current catalog.".to_string())?;
+            .ok_or_else(|| {
+                "The requested plugin is not part of the current catalog.".to_string()
+            })?;
 
-        fetch_github_release_info(plugin)
-            .map_err(|error| error.to_string())
+        fetch_github_release_info(plugin).map_err(|error| error.to_string())
     })
     .await
     .map_err(|error| error.to_string())?

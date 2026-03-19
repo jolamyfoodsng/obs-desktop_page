@@ -8,12 +8,17 @@ import {
   ShieldCheck,
   X,
 } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 import type { InstallProgressEvent, InstallResponse } from '../types/desktop'
 import type { PluginCatalogEntry } from '../types/plugin'
 import { resolveInstallModalState } from '../lib/installProgress'
-import { isScriptPlugin, resolvePrimaryEntryFiles } from '../lib/utils'
+import {
+  getPluginTypeLabel,
+  isScriptPlugin,
+  isThemeResource,
+  resolvePrimaryEntryFiles,
+} from '../lib/utils'
 import { ConfirmDialog } from './ui/ConfirmDialog'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
@@ -117,12 +122,6 @@ export function InstallProgressModal({
 }: InstallProgressModalProps) {
   const [confirmingClose, setConfirmingClose] = useState(false)
 
-  useEffect(() => {
-    if (!open) {
-      setConfirmingClose(false)
-    }
-  }, [open])
-
   if (!progress || !open) {
     return null
   }
@@ -151,6 +150,12 @@ export function InstallProgressModal({
     lastResponse?.installedPlugin,
     lastResponse?.selectedAssetName,
   )
+  const isThemeInstall = isThemeResource(plugin)
+  const pluginTypeLabel = getPluginTypeLabel(
+    plugin,
+    lastResponse?.installedPlugin,
+    lastResponse?.selectedAssetName,
+  )
   const scriptFilePath =
     lastResponse?.installedPlugin?.sourceType === 'script'
       ? (lastResponse.downloadPath ??
@@ -158,10 +163,14 @@ export function InstallProgressModal({
         null)
       : null
   const resolvedEntryFiles = resolvePrimaryEntryFiles(plugin, lastResponse?.installedPlugin)
+  const installLocation = lastResponse?.installedPlugin?.installLocation ?? null
   const hasBundleFollowup =
     isSuccess &&
     !isScriptInstall &&
     Boolean(plugin?.obsFollowupSteps?.length || resolvedEntryFiles.length)
+  const canOpenInstalledLocation =
+    Boolean(onOpenInstallFolder) &&
+    (resolvedEntryFiles.length > 0 || Boolean(installLocation) || isThemeInstall)
   const handleDismiss = () => {
     if (isActiveInstall) {
       onHide()
@@ -181,7 +190,7 @@ export function InstallProgressModal({
     }
 
     if (isReview) {
-      return 'Review required'
+      return isThemeInstall ? 'Theme review required' : 'Review required'
     }
 
     if (isManual) {
@@ -193,10 +202,10 @@ export function InstallProgressModal({
     }
 
     if (isSuccess) {
-      return 'Installation completed'
+      return isThemeInstall ? 'Theme installed' : 'Installation completed'
     }
 
-    return 'Installing plugin'
+    return isThemeInstall ? 'Installing theme' : 'Installing plugin'
   })()
 
   return (
@@ -213,7 +222,7 @@ export function InstallProgressModal({
           <div>
             <h2 className="text-[18px] font-semibold text-white">{title}</h2>
             <p className="mt-1 text-sm text-slate-400">
-              {plugin ? `${plugin.name} • v${plugin.version}` : 'Preparing installation'}
+              {plugin ? `${plugin.name} • ${pluginTypeLabel} • v${plugin.version}` : 'Preparing installation'}
             </p>
           </div>
           <button
@@ -316,7 +325,11 @@ export function InstallProgressModal({
             ) : isReview ? (
               <div className="space-y-3">
                 <div className="rounded-lg border border-amber-400/20 bg-amber-500/10 p-4">
-                  <p className="text-sm font-semibold text-white">The package needs review.</p>
+                  <p className="text-sm font-semibold text-white">
+                    {isThemeInstall
+                      ? 'This archive looks like an OBS theme package and needs review.'
+                      : 'The package needs review.'}
+                  </p>
                   <p className="mt-1 text-sm leading-7 text-slate-300">
                     {lastResponse?.reviewPlan?.summary ?? progress.detail ?? progress.message}
                   </p>
@@ -388,6 +401,17 @@ export function InstallProgressModal({
                     </p>
                   </div>
                 </div>
+                {isThemeInstall && installLocation ? (
+                  <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
+                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                      OBS theme folder
+                    </p>
+                    <p className="mt-2 text-sm text-slate-300">
+                      Theme files were installed into your OBS theme directory.
+                    </p>
+                    <CopyPathField className="mt-3" value={installLocation} />
+                  </div>
+                ) : null}
                 {hasBundleFollowup ? (
                   <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
                     <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
@@ -412,10 +436,10 @@ export function InstallProgressModal({
                   </div>
                 ) : null}
                 <div className="flex flex-wrap gap-2">
-                  {onOpenInstallFolder && resolvedEntryFiles.length ? (
+                  {onOpenInstallFolder && canOpenInstalledLocation ? (
                     <Button variant="secondary" onClick={onOpenInstallFolder}>
                       <FolderOpen className="size-4" />
-                      Open Installed Folder
+                      {isThemeInstall ? 'Open Theme Folder' : 'Open Installed Folder'}
                     </Button>
                   ) : null}
                   {onViewPlugin ? (

@@ -110,18 +110,38 @@ export function getPluginTypeLabel(
     return 'OBS Script'
   }
 
-  switch (plugin?.resourceInstallType) {
+  switch (resolveResourceInstallType(plugin)) {
     case 'dock_bundle':
       return 'Dock Extension'
     case 'browser_source_bundle':
       return 'Browser Widget'
     case 'theme_bundle':
-      return 'Theme Bundle'
+      return 'OBS Theme'
     case 'zip_extract':
       return 'Tool Bundle'
     default:
       return 'OBS Plugin'
   }
+}
+
+export function resolveResourceInstallType(
+  plugin?: PluginCatalogEntry | null,
+): ResourceInstallType | null {
+  const resourceInstallType = plugin?.resourceInstallType ?? null
+
+  if (resourceInstallType && resourceInstallType !== 'manual_guide') {
+    return resourceInstallType
+  }
+
+  if (plugin?.resourceType === 'theme') {
+    return 'theme_bundle'
+  }
+
+  return resourceInstallType
+}
+
+export function isThemeResource(plugin?: PluginCatalogEntry | null) {
+  return resolveResourceInstallType(plugin) === 'theme_bundle'
 }
 
 export function normalizePlatform(platform: string): SupportedPlatform {
@@ -198,10 +218,12 @@ export function hasGitHubReleaseSource(plugin: PluginCatalogEntry) {
 }
 
 export function canAttemptManagedInstall(plugin: PluginCatalogEntry) {
+  const resourceInstallType = resolveResourceInstallType(plugin)
+
   if (
-    plugin.resourceInstallType &&
-    plugin.resourceInstallType !== 'manual_guide' &&
-    plugin.resourceInstallType !== 'external_installer'
+    resourceInstallType &&
+    resourceInstallType !== 'manual_guide' &&
+    resourceInstallType !== 'external_installer'
   ) {
     return true
   }
@@ -373,7 +395,7 @@ function resourceInstallTypeLabel(resourceInstallType?: ResourceInstallType | nu
     case 'dock_bundle':
       return 'Dock bundle'
     case 'theme_bundle':
-      return 'Theme bundle'
+      return 'OBS Theme'
     default:
       return 'Guide-only resource'
   }
@@ -406,7 +428,7 @@ export function getPluginCompatibility(
   const hasRuntimeStrategy = Boolean(plugin.installStrategy) || isScriptPlugin(plugin)
   const hasReleaseSource = hasGitHubReleaseSource(plugin)
   const hasOfficialResourceSource = hasOfficialObsResourceSource(plugin)
-  const resourceInstallType = plugin.resourceInstallType ?? null
+  const resourceInstallType = resolveResourceInstallType(plugin)
 
   if (!metadataSupportsPlatform) {
     return {
@@ -491,7 +513,9 @@ export function getPluginCompatibility(
       isGuided: false,
       reason:
         resourceInstallType && resourceInstallType !== 'manual_guide'
-          ? `OBS Plugin Installer can attempt the official OBS resource download and handle it as a ${resourceInstallTypeLabel(resourceInstallType).toLowerCase()} on ${platformLabel(normalizedPlatform)}.`
+          ? resourceInstallType === 'theme_bundle'
+            ? `OBS Plugin Installer can attempt the official OBS resource download and install it into your OBS theme folder on ${platformLabel(normalizedPlatform)}.`
+            : `OBS Plugin Installer can attempt the official OBS resource download and handle it as a ${resourceInstallTypeLabel(resourceInstallType).toLowerCase()} on ${platformLabel(normalizedPlatform)}.`
           : `OBS Plugin Installer can attempt the official OBS resource download for ${platformLabel(normalizedPlatform)}.`,
       disabledActionLabel: '',
       canViewSource: true,
