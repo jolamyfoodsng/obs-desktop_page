@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { resolveSupportRelayConfig } from './support.js'
+import { resolveSupportRelayConfig } from './support.ts'
 
 test('support relay config accepts the current and legacy env names', () => {
   assert.deepEqual(

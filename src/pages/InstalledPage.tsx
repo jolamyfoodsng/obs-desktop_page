@@ -283,9 +283,9 @@ export function InstalledPage() {
                                     ? 'Update'
                                     : isInstallerInstall
                                       ? 'Re-install'
-                                    : isStandaloneTool
-                                      ? 'Reinstall'
-                                      : 'Repair'}
+                                      : isStandaloneTool
+                                        ? 'Reinstall'
+                                        : 'Repair'}
                               </Button>
                             )}
                             {isScriptEntry ? (

@@ -9,7 +9,7 @@ use crate::commands::detect_obs::{apply_saved_install_scope, detect_obs_installa
 use crate::commands::install_plugin::managed_script_root;
 use crate::commands::store::{load_state, push_install_history, save_state};
 use crate::commands::validate_obs::validate_obs_path;
-use crate::models::plugin::{PluginCatalogEntry, SupportedPlatform};
+use crate::models::plugin::{PluginCatalogEntry, ResourceInstallType, SupportedPlatform};
 use crate::models::state::{
     BootstrapPayload, InstallHistoryAction, InstallHistoryEntry, InstallKind,
     InstallMethod, InstallVerificationStatus, InstalledPluginRecord,
@@ -243,6 +243,28 @@ fn is_script_plugin(plugin: &PluginCatalogEntry) -> bool {
         || haystack.contains("tools → scripts")
 }
 
+fn supports_external_detection(plugin: &PluginCatalogEntry) -> bool {
+    if is_script_plugin(plugin) {
+        return true;
+    }
+
+    if let Some(resource_type) = plugin.resource_type.as_deref() {
+        if !matches!(resource_type, "plugin" | "script" | "tool") {
+            return false;
+        }
+    }
+
+    !matches!(
+        plugin.resource_install_type,
+        Some(
+            ResourceInstallType::BrowserSourceBundle
+                | ResourceInstallType::DockBundle
+                | ResourceInstallType::ThemeBundle
+                | ResourceInstallType::ZipExtract
+        )
+    )
+}
+
 fn collect_scanned_files(root: &Path, root_kind: ScanRootKind) -> Vec<ScannedFileEntry> {
     if !root.exists() {
         return Vec::new();
@@ -423,6 +445,7 @@ fn scan_external_installations(
 
     plugins
         .iter()
+        .filter(|plugin| supports_external_detection(plugin))
         .filter(|plugin| {
             plugin.supported_platforms.is_empty()
                 || plugin
@@ -432,6 +455,143 @@ fn scan_external_installations(
         })
         .filter_map(|plugin| detect_external_record(plugin, &scan_entries))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn plugin_from_json(source: &str) -> PluginCatalogEntry {
+        serde_json::from_str(source).expect("valid plugin catalog entry")
+    }
+
+    #[test]
+    fn external_detection_skips_theme_guides() {
+        let plugin = plugin_from_json(
+            r##"{
+                "id": "twitch",
+                "moduleName": "twitch",
+                "name": "Twitch",
+                "tagline": "Theme",
+                "description": "Theme",
+                "longDescription": "Theme",
+                "author": "Author",
+                "version": "1.0.0",
+                "supportedPlatforms": [],
+                "supportedOBSVersions": "See docs",
+                "minOBSVersion": "0.0.0",
+                "maxOBSVersion": null,
+                "category": "Themes",
+                "homepageUrl": "https://example.com",
+                "sourceUrl": null,
+                "officialObsUrl": null,
+                "githubUrl": null,
+                "releaseUrl": null,
+                "githubRepo": null,
+                "githubReleaseUrl": null,
+                "githubReleaseTag": null,
+                "updatedAt": null,
+                "resourceInstallType": "manual_guide",
+                "installType": "guide",
+                "packageType": "url",
+                "fileType": null,
+                "resourceType": "theme",
+                "verifiedSource": null,
+                "downloadCountRaw": null,
+                "githubStars": null,
+                "searchTags": [],
+                "preferredAssetPatterns": [],
+                "fallbackInstallType": "guide",
+                "iconKey": "theme",
+                "iconUrl": null,
+                "screenshots": [],
+                "installNotes": [],
+                "verified": false,
+                "featured": false,
+                "guideOnly": true,
+                "downloadButtonPresent": true,
+                "manualInstallUrl": "https://example.com/download",
+                "managedExtractPath": null,
+                "primaryEntryFiles": [],
+                "installInstructions": [],
+                "obsFollowupSteps": [],
+                "setupActions": [],
+                "statusNote": null,
+                "lastUpdated": "2026-03-19",
+                "downloadCount": "1",
+                "accentFrom": "#000000",
+                "accentTo": "#111111",
+                "installStrategy": null,
+                "packages": []
+            }"##,
+        );
+
+        assert!(!supports_external_detection(&plugin));
+    }
+
+    #[test]
+    fn external_detection_still_allows_manual_plugin_guides() {
+        let plugin = plugin_from_json(
+            r##"{
+                "id": "streamfx",
+                "moduleName": "streamfx",
+                "name": "StreamFX",
+                "tagline": "Plugin",
+                "description": "Plugin",
+                "longDescription": "Plugin",
+                "author": "Author",
+                "version": "1.0.0",
+                "supportedPlatforms": ["macos"],
+                "supportedOBSVersions": "See docs",
+                "minOBSVersion": "0.0.0",
+                "maxOBSVersion": null,
+                "category": "Effects",
+                "homepageUrl": "https://example.com",
+                "sourceUrl": null,
+                "officialObsUrl": null,
+                "githubUrl": null,
+                "releaseUrl": null,
+                "githubRepo": null,
+                "githubReleaseUrl": null,
+                "githubReleaseTag": null,
+                "updatedAt": null,
+                "resourceInstallType": "manual_guide",
+                "installType": "guide",
+                "packageType": "url",
+                "fileType": null,
+                "resourceType": "plugin",
+                "verifiedSource": null,
+                "downloadCountRaw": null,
+                "githubStars": null,
+                "searchTags": [],
+                "preferredAssetPatterns": [],
+                "fallbackInstallType": "guide",
+                "iconKey": "plugin",
+                "iconUrl": null,
+                "screenshots": [],
+                "installNotes": [],
+                "verified": false,
+                "featured": false,
+                "guideOnly": true,
+                "downloadButtonPresent": true,
+                "manualInstallUrl": "https://example.com/download",
+                "managedExtractPath": null,
+                "primaryEntryFiles": [],
+                "installInstructions": [],
+                "obsFollowupSteps": [],
+                "setupActions": [],
+                "statusNote": null,
+                "lastUpdated": "2026-03-19",
+                "downloadCount": "1",
+                "accentFrom": "#000000",
+                "accentTo": "#111111",
+                "installStrategy": null,
+                "packages": []
+            }"##,
+        );
+
+        assert!(supports_external_detection(&plugin));
+    }
 }
 
 fn merge_installed_records(
