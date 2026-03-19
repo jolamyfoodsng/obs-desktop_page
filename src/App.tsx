@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { HashRouter, Route, Routes } from 'react-router-dom'
 import { AlertTriangle, LoaderCircle, RotateCcw } from 'lucide-react'
 
-import { Toaster } from 'sonner'
+import { Toaster, toast } from 'sonner'
 
 import { AppUpdateDialog } from './components/AppUpdateDialog'
 import { EmptyState } from './components/EmptyState'
@@ -351,6 +351,22 @@ function App() {
     }
   }
 
+  const handleOpenManualFallback = async () => {
+    const refreshedSnapshot = await checkForAppUpdate({ silent: true })
+    const resolvedSnapshot = refreshedSnapshot ?? appUpdate
+    const url = resolvedSnapshot?.manualFallbackUrl ?? resolvedSnapshot?.selectedAssetUrl ?? null
+
+    if (!url) {
+      toast.error(
+        resolvedSnapshot?.message ??
+          'This app update is no longer available. Check for updates again to refresh the release metadata.',
+      )
+      return
+    }
+
+    await openExternal(url)
+  }
+
   return (
     <>
       {needsSetup ? (
@@ -390,7 +406,9 @@ function App() {
           }}
           onOpenManualFallback={
             appUpdate.manualFallbackUrl || appUpdate.selectedAssetUrl
-              ? () => void openExternal(appUpdate.manualFallbackUrl ?? appUpdate.selectedAssetUrl ?? '')
+              ? () => {
+                void handleOpenManualFallback()
+              }
               : undefined
           }
           onRetry={() => {

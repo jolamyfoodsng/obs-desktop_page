@@ -1217,18 +1217,21 @@ async function fetchSignature(asset: GitHubReleaseAsset) {
   return response.text()
 }
 
-function buildDownloadUrl(
+export function buildDownloadUrl(
   baseUrl: string,
   target: SupportedTarget,
   version: string,
   channel: string,
-  options?: { assetName?: string },
+  options?: { assetName?: string; releaseTag?: string },
 ) {
   const url = new URL(
     `/api/download/${target.target}/${target.arch}/${target.bundleType}/${encodeURIComponent(version)}`,
     `${baseUrl}/`,
   )
   url.searchParams.set('channel', channel)
+  if (options?.releaseTag) {
+    url.searchParams.set('releaseTag', options.releaseTag)
+  }
   if (options?.assetName) {
     url.searchParams.set('assetName', options.assetName)
   }
@@ -1305,7 +1308,9 @@ export async function resolveUpdateCatalog(
           target: target.target,
           arch: target.arch,
           bundleType: target.bundleType,
-          url: buildDownloadUrl(baseUrl, target, latestVersion, channel),
+          url: buildDownloadUrl(baseUrl, target, latestVersion, channel, {
+            releaseTag: release.tag_name,
+          }),
           signature,
           fileName: selection.candidate.asset.name,
           size: selection.candidate.asset.size,
@@ -1349,6 +1354,7 @@ export async function resolveUpdateCatalog(
       payload.manualFallbackReason = manualFallback.reason
       payload.manualFallbackUrl = buildDownloadUrl(baseUrl, selectedTarget, latestVersion, channel, {
         assetName: manualFallback.asset.name,
+        releaseTag: release.tag_name,
       })
       payload.manualFallbackSize = manualFallback.asset.size
     }

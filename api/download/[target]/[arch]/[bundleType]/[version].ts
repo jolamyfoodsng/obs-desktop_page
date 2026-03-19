@@ -24,6 +24,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
   const version = readPathParam(request.query.version)
   const channel = readPathParam(request.query.channel)
   const requestedAssetName = readPathParam(request.query.assetName)
+  const requestedReleaseTag = readPathParam(request.query.releaseTag)
 
   if (!target || !arch || !bundleType || !version) {
     return sendError(response, 400, 'Missing download route parameters.')
@@ -42,7 +43,7 @@ export default async function handler(request: VercelRequest, response: VercelRe
         bundleType,
         currentVersion: version,
         channel,
-        releaseVersion: version,
+        releaseVersion: requestedReleaseTag ?? version,
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -51,7 +52,9 @@ export default async function handler(request: VercelRequest, response: VercelRe
         return sendError(
           response,
           404,
-          `Requested release ${version} is not available. Re-check for updates to refresh the latest release metadata.`,
+          requestedReleaseTag
+            ? `Requested release ${version} (tag ${requestedReleaseTag}) is not available. Re-check for updates to refresh the latest release metadata.`
+            : `Requested release ${version} is not available. Re-check for updates to refresh the latest release metadata.`,
         )
       }
 
