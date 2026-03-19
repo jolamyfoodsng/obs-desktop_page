@@ -317,9 +317,9 @@ export function getInstallOwnershipLabel(
     case 'managed':
       return 'Installed by OBS Plugin Installer'
     case 'installer':
-      return 'Installed via guided installer'
+      return 'Installed using external installer'
     case 'external':
-      return 'Detected in OBS'
+      return 'Installed outside the app'
     default:
       return 'Not installed'
   }
