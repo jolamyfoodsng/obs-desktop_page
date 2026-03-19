@@ -502,6 +502,7 @@ This updater flow is production-minded, but you still need real release-signing 
 - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` if your key uses one
 
 The shipped app does not fetch its updater public key at runtime. It embeds the value from `src-tauri/updater.pub.key` when the desktop binary is compiled, so any updater key change requires a rebuild before update verification can succeed.
+Builds released before `v0.40.0` predate the current updater signing key, so they must be upgraded once via the manual installer before in-app updates can resume.
 
 You may also still want platform-native signing later:
 

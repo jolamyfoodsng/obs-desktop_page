@@ -6,6 +6,7 @@ import {
   buildDownloadUrl,
   buildReleaseTagCandidates,
   classifyReleaseAsset,
+  requiresManualUpgradeForKeyRotation,
   resolveManualFallbackForTarget,
   resolveSelectionForTarget,
   resolveSupportedTarget,
@@ -198,6 +199,13 @@ test('release tag candidates cover version tags with and without v-dot prefixes'
   assert.deepEqual(buildReleaseTagCandidates('0.31.0'), ['0.31.0', 'v0.31.0', 'v.0.31.0'])
   assert.deepEqual(buildReleaseTagCandidates('v0.31.0'), ['v0.31.0', '0.31.0', 'v.0.31.0'])
   assert.deepEqual(buildReleaseTagCandidates('v.0.31.0'), ['v.0.31.0', '0.31.0', 'v0.31.0'])
+})
+
+test('clients built before the updater key rotation require a manual upgrade path', () => {
+  assert.equal(requiresManualUpgradeForKeyRotation('0.35.0', '0.40.0'), true)
+  assert.equal(requiresManualUpgradeForKeyRotation('0.39.9', '0.40.0'), true)
+  assert.equal(requiresManualUpgradeForKeyRotation('0.40.0', '0.40.1'), false)
+  assert.equal(requiresManualUpgradeForKeyRotation('0.41.0', '0.41.1'), false)
 })
 
 test('download URLs carry the exact GitHub release tag for nonstandard release names', () => {

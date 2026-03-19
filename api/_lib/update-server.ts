@@ -3,6 +3,7 @@ import { coerce, compare, lt } from 'semver'
 
 const GITHUB_API_BASE = 'https://api.github.com'
 const CACHE_CONTROL = 'public, s-maxage=300, stale-while-revalidate=60'
+const UPDATER_KEY_ROTATION_VERSION = '0.40.0'
 
 const SUPPORTED_TARGETS = [
   {
@@ -186,6 +187,7 @@ export type UpdateStatus =
   | 'no-update'
   | 'update-available'
   | 'update-required'
+  | 'failed'
   | 'no-installable-asset'
   | 'source-only'
   | 'ambiguous'
@@ -1249,6 +1251,13 @@ function compareVersions(left: string, right: string) {
   return compare(leftVersion, rightVersion)
 }
 
+export function requiresManualUpgradeForKeyRotation(currentVersion: string, latestVersion: string) {
+  return (
+    compareVersions(currentVersion, UPDATER_KEY_ROTATION_VERSION) < 0 &&
+    compareVersions(latestVersion, UPDATER_KEY_ROTATION_VERSION) >= 0
+  )
+}
+
 export function sendJson(response: VercelResponse, statusCode: number, payload: unknown) {
   response.setHeader('Cache-Control', CACHE_CONTROL)
   response.status(statusCode).json(payload)
@@ -1390,6 +1399,27 @@ export async function resolveUpdateCatalog(
     payload.selectedAssetReason = selectedPlatform.reason
     payload.selectedAssetUrl = selectedPlatform.url
     payload.selectedAssetSize = selectedPlatform.size
+
+    if (requiresManualUpgradeForKeyRotation(currentVersion, latestVersion)) {
+      if (payload.manualFallbackName && payload.manualFallbackUrl) {
+        payload.selectedAssetName = payload.manualFallbackName
+        payload.selectedAssetReason = payload.manualFallbackReason
+        payload.selectedAssetUrl = payload.manualFallbackUrl
+        payload.selectedAssetSize = payload.manualFallbackSize
+      }
+
+      payload.status = 'failed'
+      payload.message =
+        'This installed build uses an older updater signing key, so it cannot verify this in-app update. Download and install the latest build once, then future in-app updates will work again.'
+      console.warn('[update-api] forcing manual update because client predates updater key rotation', {
+        currentVersion,
+        latestVersion,
+        selectedPlatform: selectedKey,
+        manualFallback: payload.manualFallbackName ?? null,
+      })
+      return payload
+    }
+
     payload.status = lt(currentVersion, minimumSupportedVersion)
       ? 'update-required'
       : 'update-available'
