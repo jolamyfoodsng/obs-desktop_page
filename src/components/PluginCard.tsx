@@ -144,7 +144,7 @@ export function PluginCard({
   const isUpdateAvailable = pluginState === 'update-available'
   const actionLabel =
     isInstallerBased && isInstalledManaged && !isUpdateAvailable
-      ? 'Download again'
+      ? 'Re-install'
       : 'Install'
   const isAttachPending =
     installedPlugin?.status === 'manual-step' && installedPlugin.sourceType === 'script'

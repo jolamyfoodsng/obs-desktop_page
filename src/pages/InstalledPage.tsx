@@ -282,7 +282,7 @@ export function InstalledPage() {
                                   : hasUpdate
                                     ? 'Update'
                                     : isInstallerInstall
-                                      ? 'Download again'
+                                      ? 'Re-install'
                                     : isStandaloneTool
                                       ? 'Reinstall'
                                       : 'Repair'}
