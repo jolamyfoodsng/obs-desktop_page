@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   buildReleaseAssetCatalog,
+  buildDownloadUrl,
   buildReleaseTagCandidates,
   classifyReleaseAsset,
   resolveManualFallbackForTarget,
@@ -172,6 +173,19 @@ test('release tag candidates cover version tags with and without v-dot prefixes'
   assert.deepEqual(buildReleaseTagCandidates('0.31.0'), ['0.31.0', 'v0.31.0', 'v.0.31.0'])
   assert.deepEqual(buildReleaseTagCandidates('v0.31.0'), ['v0.31.0', '0.31.0', 'v.0.31.0'])
   assert.deepEqual(buildReleaseTagCandidates('v.0.31.0'), ['v.0.31.0', '0.31.0', 'v0.31.0'])
+})
+
+test('download URLs carry the exact GitHub release tag for nonstandard release names', () => {
+  const target = getTarget('darwin', 'arm64', 'app')
+  const url = buildDownloadUrl('https://updates.example.test', target, '0.31.0', 'stable', {
+    releaseTag: 'v.0.31.0',
+    assetName: 'OBS.Plugin.Installer.app.tar.gz',
+  })
+
+  assert.equal(
+    url,
+    'https://updates.example.test/api/download/macos/aarch64/app/0.31.0?channel=stable&releaseTag=v.0.31.0&assetName=OBS.Plugin.Installer.app.tar.gz',
+  )
 })
 
 test('signatures must match the exact selected updater asset', () => {
