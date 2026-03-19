@@ -3,6 +3,7 @@ import { coerce, compare, lt } from 'semver'
 
 const GITHUB_API_BASE = 'https://api.github.com'
 const CACHE_CONTROL = 'no-store'
+const MAX_GITHUB_RELEASE_PAGES = 50
 const UPDATER_KEY_ROTATION_VERSION = '0.40.0'
 
 const SUPPORTED_TARGETS = [
@@ -213,6 +214,31 @@ interface GitHubRelease {
   assets: GitHubReleaseAsset[]
 }
 
+interface ReleaseVersionCandidate {
+  version: string
+  raw: string
+  source: 'tag_name' | 'name'
+}
+
+interface ReleaseSelectionCandidate {
+  release: GitHubRelease
+  version: string
+  rawVersion: string
+  versionSource: 'tag_name' | 'name'
+}
+
+interface ReleaseEvaluationLogEntry {
+  tag: string
+  name: string | null
+  draft: boolean
+  prerelease: boolean
+  publishedAt: string | null
+  parsedVersion: string | null
+  versionSource: 'tag_name' | 'name' | null
+  included: boolean
+  excludedReason: string | null
+}
+
 interface SelectedAssetCandidate {
   asset: GitHubReleaseAsset
   signatureAsset: GitHubReleaseAsset
@@ -345,6 +371,9 @@ const BUNDLE_TYPE_ALIASES = {
   '.app.tar.gz': 'app',
 } as const
 
+const STRICT_RELEASE_VERSION_PATTERN =
+  /^(?:v(?:\.)?)?(?<version>\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?)$/i
+
 function getEnv(name: string) {
   const value = process.env[name]?.trim()
   if (!value) {
@@ -370,6 +399,44 @@ function normalizeVersion(value: string | undefined | null) {
   }
 
   return coerce(trimmed)?.version ?? null
+}
+
+function parseStrictReleaseVersion(value: string | undefined | null) {
+  if (!value) {
+    return null
+  }
+
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return null
+  }
+
+  const match = STRICT_RELEASE_VERSION_PATTERN.exec(trimmed)
+  return match?.groups?.version ?? null
+}
+
+function resolveReleaseVersionCandidate(
+  release: Pick<GitHubRelease, 'tag_name' | 'name'>,
+): ReleaseVersionCandidate | null {
+  const tagVersion = parseStrictReleaseVersion(release.tag_name)
+  if (tagVersion) {
+    return {
+      version: tagVersion,
+      raw: release.tag_name,
+      source: 'tag_name',
+    }
+  }
+
+  const nameVersion = parseStrictReleaseVersion(release.name)
+  if (nameVersion && release.name) {
+    return {
+      version: nameVersion,
+      raw: release.name,
+      source: 'name',
+    }
+  }
+
+  return null
 }
 
 function readQueryValue(value: string | string[] | undefined) {
@@ -487,6 +554,29 @@ async function githubJson<T>(path: string) {
   return response.json() as Promise<T>
 }
 
+async function fetchAllReleases() {
+  const releases: GitHubRelease[] = []
+
+  for (let page = 1; page <= MAX_GITHUB_RELEASE_PAGES; page += 1) {
+    const pageReleases = await githubJson<GitHubRelease[]>(`/releases?per_page=100&page=${page}`)
+    releases.push(...pageReleases)
+
+    if (pageReleases.length < 100) {
+      console.info('[update-api] GitHub releases fetched', {
+        count: releases.length,
+        pages: page,
+      })
+      return releases
+    }
+  }
+
+  console.warn('[update-api] GitHub release pagination limit reached', {
+    count: releases.length,
+    maxPages: MAX_GITHUB_RELEASE_PAGES,
+  })
+  return releases
+}
+
 export function buildReleaseTagCandidates(versionOrTag: string) {
   const trimmed = versionOrTag.trim()
   const normalized = normalizeVersion(trimmed)
@@ -541,36 +631,137 @@ async function fetchReleaseByTag(versionOrTag: string) {
   throw new Error(`No GitHub release was found for ${versionOrTag}.`)
 }
 
+export function selectLatestRelease(
+  releases: GitHubRelease[],
+  channel: string,
+): ReleaseSelectionCandidate | null {
+  const evaluations: Array<ReleaseSelectionCandidate & { log: ReleaseEvaluationLogEntry }> = []
+  const excluded: ReleaseEvaluationLogEntry[] = []
+
+  for (const release of releases) {
+    const baseLog: Omit<ReleaseEvaluationLogEntry, 'parsedVersion' | 'versionSource' | 'included' | 'excludedReason'> = {
+      tag: release.tag_name,
+      name: release.name ?? null,
+      draft: release.draft,
+      prerelease: release.prerelease,
+      publishedAt: release.published_at ?? null,
+    }
+
+    if (release.draft) {
+      excluded.push({
+        ...baseLog,
+        parsedVersion: null,
+        versionSource: null,
+        included: false,
+        excludedReason: 'draft release',
+      })
+      continue
+    }
+
+    if (channel === 'stable' && release.prerelease) {
+      excluded.push({
+        ...baseLog,
+        parsedVersion: null,
+        versionSource: null,
+        included: false,
+        excludedReason: 'prerelease excluded from stable channel',
+      })
+      continue
+    }
+
+    const versionCandidate = resolveReleaseVersionCandidate(release)
+    if (!versionCandidate) {
+      excluded.push({
+        ...baseLog,
+        parsedVersion: null,
+        versionSource: null,
+        included: false,
+        excludedReason: 'tag/name is not a strict semantic version',
+      })
+      continue
+    }
+
+    evaluations.push({
+      release,
+      version: versionCandidate.version,
+      rawVersion: versionCandidate.raw,
+      versionSource: versionCandidate.source,
+      log: {
+        ...baseLog,
+        parsedVersion: versionCandidate.version,
+        versionSource: versionCandidate.source,
+        included: true,
+        excludedReason: null,
+      },
+    })
+  }
+
+  const byPublishedAtDescending = (left: GitHubRelease, right: GitHubRelease) =>
+    Date.parse(right.published_at ?? '') - Date.parse(left.published_at ?? '')
+
+  const candidates = evaluations
+    .sort(
+      (left, right) =>
+        compare(right.version, left.version) ||
+        Number(left.release.prerelease) - Number(right.release.prerelease) ||
+        byPublishedAtDescending(left.release, right.release) ||
+        left.release.tag_name.localeCompare(right.release.tag_name),
+    )
+
+  console.info('[update-api] release candidates evaluated', {
+    channel,
+    candidates: [...candidates.map((entry) => entry.log), ...excluded],
+  })
+
+  if (candidates.length === 0) {
+    return null
+  }
+
+  return {
+    release: candidates[0].release,
+    version: candidates[0].version,
+    rawVersion: candidates[0].rawVersion,
+    versionSource: candidates[0].versionSource,
+  }
+}
+
 async function fetchLatestRelease(channel: string, releaseVersion?: string) {
   if (releaseVersion) {
     const release = await fetchReleaseByTag(releaseVersion)
-    console.info('[update-api] release fetched', {
+    const versionCandidate = resolveReleaseVersionCandidate(release)
+    if (!versionCandidate) {
+      throw new Error(`Requested GitHub release ${release.tag_name} does not expose a valid semantic version.`)
+    }
+
+    console.info('[update-api] release selected', {
       tag: release.tag_name,
-      version: normalizeVersion(release.tag_name),
+      version: versionCandidate.version,
+      versionSource: versionCandidate.source,
+      rawVersion: versionCandidate.raw,
       pinned: true,
     })
-    return release
+    return {
+      release,
+      version: versionCandidate.version,
+      rawVersion: versionCandidate.raw,
+      versionSource: versionCandidate.source,
+    }
   }
 
-  const releases = await githubJson<GitHubRelease[]>('/releases?per_page=20')
-  const selected = releases.find((release) => {
-    if (release.draft) {
-      return false
-    }
-    if (channel === 'stable') {
-      return !release.prerelease
-    }
-    return true
-  })
+  const releases = await fetchAllReleases()
+  const selected = selectLatestRelease(releases, channel)
 
   if (!selected) {
-    throw new Error(`No ${channel} GitHub release is available.`)
+    throw new Error(`No ${channel} GitHub release with a valid semantic version is available.`)
   }
 
-  console.info('[update-api] release fetched', {
-    tag: selected.tag_name,
-    version: normalizeVersion(selected.tag_name),
-    prerelease: selected.prerelease,
+  console.info('[update-api] release selected', {
+    tag: selected.release.tag_name,
+    version: selected.version,
+    versionSource: selected.versionSource,
+    rawVersion: selected.rawVersion,
+    prerelease: selected.release.prerelease,
+    publishedAt: selected.release.published_at ?? null,
   })
 
   return selected
@@ -788,7 +979,7 @@ export function classifyReleaseAsset(
 export function buildReleaseAssetCatalog(
   release: Pick<GitHubRelease, 'assets' | 'tag_name' | 'name'>,
 ): ReleaseAssetCatalog {
-  const releaseVersion = normalizeVersion(release.tag_name) ?? normalizeVersion(release.name)
+  const releaseVersion = resolveReleaseVersionCandidate(release)?.version ?? null
   const assets = release.assets.map((asset) => classifyReleaseAsset(asset, releaseVersion))
   const signatureAssetsByTargetName = assets.reduce<Map<string, GitHubReleaseAsset[]>>((accumulator, asset) => {
     if (!asset.signatureTargetName) {
@@ -1274,8 +1465,9 @@ export async function resolveUpdateCatalog(
   const baseUrl = inferBaseUrl(options.request)
   const channel = resolveChannel(options.channel)
   const requestedVersion = options.releaseVersion?.trim()
-  const release = await fetchLatestRelease(channel, requestedVersion)
-  const latestVersion = normalizeVersion(release.tag_name) ?? normalizeVersion(release.name) ?? '0.0.0'
+  const selectedRelease = await fetchLatestRelease(channel, requestedVersion)
+  const release = selectedRelease.release
+  const latestVersion = selectedRelease.version
   const minimumSupportedVersion = resolveMinimumSupportedVersion(release)
   const releaseNotes = stripReleaseFrontmatter(release.body ?? '')
 

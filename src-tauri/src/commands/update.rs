@@ -238,6 +238,16 @@ fn fetch_metadata(base_url: &str, selection: &UpdateClientSelection, channel: &s
         pairs.append_pair("channel", channel);
     }
 
+    log::info!(
+        "updater metadata request: url={} current_version={} target={} arch={} bundle_type={} channel={}",
+        url,
+        selection.current_version,
+        selection.target,
+        selection.arch,
+        selection.bundle_type,
+        channel
+    );
+
     let client = Client::builder()
         .timeout(UPDATE_ROUTE_TIMEOUT)
         .build()

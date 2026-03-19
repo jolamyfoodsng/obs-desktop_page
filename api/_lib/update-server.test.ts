@@ -10,6 +10,7 @@ import {
   resolveManualFallbackForTarget,
   resolveSelectionForTarget,
   resolveSupportedTarget,
+  selectLatestRelease,
 } from './update-server.ts'
 
 let nextAssetId = 1
@@ -25,14 +26,25 @@ function createAsset(name: string) {
   }
 }
 
-function createRelease(tagName: string, assetNames: string[]) {
+function createRelease(
+  tagName: string,
+  assetNames: string[],
+  options?: {
+    name?: string | null
+    draft?: boolean
+    prerelease?: boolean
+    publishedAt?: string | null
+  },
+) {
   nextAssetId = 1
   return {
+    id: 1,
     tag_name: tagName,
-    name: tagName,
-    draft: false,
-    prerelease: false,
+    name: options?.name ?? tagName,
+    draft: options?.draft ?? false,
+    prerelease: options?.prerelease ?? false,
     html_url: 'https://example.test/release',
+    published_at: options?.publishedAt ?? null,
     assets: assetNames.map((name) => createAsset(name)),
   }
 }
@@ -199,6 +211,69 @@ test('release tag candidates cover version tags with and without v-dot prefixes'
   assert.deepEqual(buildReleaseTagCandidates('0.31.0'), ['0.31.0', 'v0.31.0', 'v.0.31.0'])
   assert.deepEqual(buildReleaseTagCandidates('v0.31.0'), ['v0.31.0', '0.31.0', 'v.0.31.0'])
   assert.deepEqual(buildReleaseTagCandidates('v.0.31.0'), ['v.0.31.0', '0.31.0', 'v0.31.0'])
+})
+
+test('latest release selection uses highest semantic version instead of release array position', () => {
+  const selected = selectLatestRelease(
+    [
+      createRelease('v0.0.0', [], { publishedAt: '2026-03-19T10:00:00Z' }),
+      createRelease('v1.0.0', [], { publishedAt: '2026-03-18T10:00:00Z' }),
+      createRelease('v1.0.1', [], { publishedAt: '2026-03-17T10:00:00Z' }),
+    ],
+    'stable',
+  )
+
+  assert.equal(selected?.release.tag_name, 'v1.0.1')
+  assert.equal(selected?.version, '1.0.1')
+})
+
+test('stable channel excludes prereleases even when they appear newer in the release list', () => {
+  const selected = selectLatestRelease(
+    [
+      createRelease('v1.1.0-beta.2', [], {
+        prerelease: true,
+        publishedAt: '2026-03-19T10:00:00Z',
+      }),
+      createRelease('v1.0.1', [], { publishedAt: '2026-03-18T10:00:00Z' }),
+    ],
+    'stable',
+  )
+
+  assert.equal(selected?.release.tag_name, 'v1.0.1')
+  assert.equal(selected?.version, '1.0.1')
+})
+
+test('beta channel can opt into prereleases and still uses semantic version ordering', () => {
+  const selected = selectLatestRelease(
+    [
+      createRelease('v1.0.1', [], { publishedAt: '2026-03-18T10:00:00Z' }),
+      createRelease('v1.1.0-beta.2', [], {
+        prerelease: true,
+        publishedAt: '2026-03-19T10:00:00Z',
+      }),
+    ],
+    'beta',
+  )
+
+  assert.equal(selected?.release.tag_name, 'v1.1.0-beta.2')
+  assert.equal(selected?.version, '1.1.0-beta.2')
+})
+
+test('invalid or unrelated release tags are ignored during latest selection', () => {
+  const selected = selectLatestRelease(
+    [
+      createRelease('latest', [], { name: 'Latest build', publishedAt: '2026-03-19T10:00:00Z' }),
+      createRelease('release-placeholder', [], {
+        name: 'Placeholder release',
+        publishedAt: '2026-03-18T10:00:00Z',
+      }),
+      createRelease('v1.0.1', [], { publishedAt: '2026-03-17T10:00:00Z' }),
+    ],
+    'stable',
+  )
+
+  assert.equal(selected?.release.tag_name, 'v1.0.1')
+  assert.equal(selected?.version, '1.0.1')
 })
 
 test('clients built before the updater key rotation require a manual upgrade path', () => {
