@@ -86,6 +86,14 @@ function getSourcePage(plugin?: PluginCatalogEntry | null) {
   return plugin.sourceUrl ?? plugin.manualInstallUrl ?? plugin.homepageUrl ?? null
 }
 
+function getManualUninstallGuideUrl(plugin?: PluginCatalogEntry | null) {
+  if (!plugin) {
+    return null
+  }
+
+  return plugin.manualInstallUrl ?? plugin.homepageUrl ?? plugin.sourceUrl ?? null
+}
+
 function buildTrackedPluginRow(
   plugin: PluginCatalogEntry,
   installedPlugin: InstalledPluginRecord,
@@ -142,7 +150,7 @@ function buildTrackedPluginRow(
   } else if (isInstallerInstall) {
     statusTone = 'neutral'
     helperText =
-      'This plugin was installed through a guided installer flow and the install completed successfully.'
+      'OBS Plugin Installer launched the vendor installer, and matching plugin files are still present in your OBS folders.'
   }
 
   let deleteDisabledReason: string | null = null
@@ -347,11 +355,14 @@ export function InstalledPage() {
 
   function renderTrackedRow(row: TrackedPluginRow) {
     const sourcePage = getSourcePage(row.plugin)
+    const manualUninstallGuideUrl = getManualUninstallGuideUrl(row.plugin)
     const canRetry = row.compatibility.canInstall
     const canOpenManualFix =
       row.section === 'attention' &&
       (row.isScriptAttachPending ||
         (row.installedPlugin.status === 'manual-step' && row.isStandaloneTool))
+    const showManualUninstallAction =
+      row.section === 'installed' && !row.canDelete && (row.installMethod === 'installer' || row.isExternalInstall)
     const primaryActionLabel = row.section === 'attention' ? 'Fix installation' : 'Reinstall'
     const secondaryActionLabel = row.section === 'attention' ? 'Retry' : null
     const removeButton = (
@@ -501,7 +512,23 @@ export function InstalledPage() {
                 Open Scripts Folder
               </Button>
             ) : null}
-            {row.canDelete ? (
+            {showManualUninstallAction ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  if (manualUninstallGuideUrl) {
+                    void openExternal(manualUninstallGuideUrl)
+                    return
+                  }
+
+                  void revealPath(row.installedPlugin.installLocation)
+                }}
+              >
+                <ExternalLink className="size-4" />
+                {manualUninstallGuideUrl ? 'Uninstall manually' : 'Open install location'}
+              </Button>
+            ) : row.canDelete ? (
               removeButton
             ) : (
               <span title={row.deleteDisabledReason ?? undefined}>{removeButton}</span>

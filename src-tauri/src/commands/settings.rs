@@ -273,9 +273,22 @@ pub fn uninstall_plugin(app: AppHandle, plugin_id: String) -> Result<UninstallRe
         return Err("That plugin is not currently tracked as installed.".to_string());
     };
 
+    eprintln!(
+        "[uninstall] requested plugin={} install_location={} managed={} source_type={:?} tracked_files={}",
+        record.plugin_id,
+        record.install_location,
+        record.managed,
+        record.source_type,
+        record.installed_files.len()
+    );
+
     if !can_safely_uninstall(&record) {
+        eprintln!(
+            "[uninstall] blocked plugin={} reason=manual-or-external-flow-without-safe-file-list",
+            record.plugin_id
+        );
         return Err(
-            "This install was completed through an external or manual flow, so the app cannot safely remove it automatically. Use the vendor uninstaller or remove it from OBS manually."
+            "This plugin could not be removed automatically. It was installed through a guided or manual flow, so you need to use the vendor uninstaller or remove it from OBS manually."
                 .to_string(),
         );
     }
@@ -285,21 +298,44 @@ pub fn uninstall_plugin(app: AppHandle, plugin_id: String) -> Result<UninstallRe
 
     for relative_path in &record.installed_files {
         let Some((existing_path, cleanup_root)) = resolve_tracked_path(&record, relative_path) else {
+            eprintln!(
+                "[uninstall] plugin={} tracked_path_missing relative_path={}",
+                record.plugin_id,
+                relative_path
+            );
             continue;
         };
 
+        eprintln!(
+            "[uninstall] plugin={} deleting target_path={}",
+            record.plugin_id,
+            existing_path.display()
+        );
+
         if existing_path.is_dir() {
             fs::remove_dir_all(&existing_path).map_err(|error| {
+                eprintln!(
+                    "[uninstall] plugin={} delete_failed target_path={} error={}",
+                    record.plugin_id,
+                    existing_path.display(),
+                    error
+                );
                 format!(
-                    "Could not remove {}: {}",
+                    "This plugin could not be removed automatically. Could not remove {}: {}",
                     existing_path.display(),
                     error
                 )
             })?;
         } else {
             fs::remove_file(&existing_path).map_err(|error| {
+                eprintln!(
+                    "[uninstall] plugin={} delete_failed target_path={} error={}",
+                    record.plugin_id,
+                    existing_path.display(),
+                    error
+                );
                 format!(
-                    "Could not remove {}: {}",
+                    "This plugin could not be removed automatically. Could not remove {}: {}",
                     existing_path.display(),
                     error
                 )
@@ -312,6 +348,20 @@ pub fn uninstall_plugin(app: AppHandle, plugin_id: String) -> Result<UninstallRe
                 prune_empty_directories(parent, &cleanup_root).map_err(|error| error.to_string())?;
         }
     }
+
+    let remaining_tracked_files = record
+        .installed_files
+        .iter()
+        .filter(|relative_path| resolve_tracked_path(&record, relative_path).is_some())
+        .count();
+
+    eprintln!(
+        "[uninstall] plugin={} removed_files={} removed_directories={} remaining_tracked_files={}",
+        record.plugin_id,
+        removed_files,
+        removed_directories,
+        remaining_tracked_files
+    );
 
     push_install_history(
         &mut state,

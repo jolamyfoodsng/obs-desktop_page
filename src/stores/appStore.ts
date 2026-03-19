@@ -735,7 +735,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
       return response
     } catch (error) {
       set({ uninstallingPluginId: null })
-      toast.error(getErrorMessage(error, 'Could not remove the installed plugin.'))
+      toast.error(getErrorMessage(error, 'This plugin could not be removed automatically.'))
       return undefined
     }
   },
