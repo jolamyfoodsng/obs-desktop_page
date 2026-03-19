@@ -14,20 +14,24 @@ import {
 import { useNavigate } from 'react-router-dom'
 
 import { EmptyState } from '../components/EmptyState'
+import { InstallLocationSection } from '../components/InstallLocationSection'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { ConfirmDialog } from '../components/ui/ConfirmDialog'
-import { CopyPathField } from '../components/ui/CopyPathField'
+import { APP_NAME } from '../lib/branding'
 import {
   formatDisplayDate,
+  getInstalledThemeLayout,
   getInstallMethod,
   getInstallOwnershipLabel,
+  getPrimaryInstalledLocation,
   getPluginCompatibility,
   getRecommendedPackage,
   hasGitHubReleaseSource,
+  isThemeResource,
   isScriptPlugin,
   isUpdateAvailable,
-  resolvePrimaryEntryFiles,
+  resolveInstalledLocationEntries,
 } from '../lib/utils'
 import { useAppStore } from '../stores/appStore'
 import type { InstallHistoryEntry, InstalledPluginRecord } from '../types/desktop'
@@ -52,7 +56,8 @@ interface TrackedPluginRow {
   isScriptEntry: boolean
   isStandaloneTool: boolean
   isScriptAttachPending: boolean
-  resolvedEntryFiles: ReturnType<typeof resolvePrimaryEntryFiles>
+  installLocations: ReturnType<typeof resolveInstalledLocationEntries>
+  primaryInstallLocation: ReturnType<typeof getPrimaryInstalledLocation>
   canDelete: boolean
   deleteDisabledReason: string | null
 }
@@ -98,10 +103,13 @@ function buildTrackedPluginRow(
   const isInstallerInstall = installMethod === 'installer'
   const isExternalInstall = installMethod === 'external'
   const isScriptEntry = isScriptPlugin(plugin, installedPlugin)
+  const isThemeEntry = isThemeResource(plugin)
   const isStandaloneTool = installedPlugin.sourceType === 'standalone-tool'
   const isScriptAttachPending =
     installedPlugin.status === 'manual-step' && installedPlugin.sourceType === 'script'
-  const resolvedEntryFiles = resolvePrimaryEntryFiles(plugin, installedPlugin)
+  const installLocations = resolveInstalledLocationEntries(plugin, installedPlugin)
+  const primaryInstallLocation = getPrimaryInstalledLocation(plugin, installedPlugin)
+  const themeLayout = getInstalledThemeLayout(installedPlugin)
   const needsAttention =
     installedPlugin.status === 'manual-step' ||
     installedPlugin.status === 'missing-files' ||
@@ -119,18 +127,22 @@ function buildTrackedPluginRow(
     statusLabel = 'Missing installation files'
     statusTone = 'danger'
     helperText = isScriptEntry
-      ? 'The script record still exists, but one or more tracked files are missing from the OBS scripts folder.'
+        ? 'The script record still exists, but one or more tracked files are missing from the OBS scripts folder.'
       : isStandaloneTool
         ? 'This tool was installed before, but one or more tracked files are no longer present in its install folder.'
-        : 'OBS Plugin Installer expected this plugin in your OBS folders, but one or more tracked files are missing.'
+        : `${APP_NAME} expected this plugin in your OBS folders, but one or more tracked files are missing.`
   } else if (installedPlugin.status === 'manual-step') {
     statusLabel = 'Installation incomplete'
     statusTone = 'warning'
     helperText = isScriptAttachPending
       ? 'The script file was copied successfully, but OBS still needs you to add it in Tools -> Scripts.'
-      : isStandaloneTool
-        ? 'The files are present, but the last setup step still needs to be completed before this tool is fully ready.'
-        : 'The install started, but OBS Plugin Installer could not verify the final plugin files yet.'
+      : isThemeEntry && themeLayout === 'legacy-qss'
+        ? 'Theme files were copied into your OBS themes folder, but this package only contains a legacy .qss theme. Recent OBS builds may not list it in the theme picker.'
+        : isThemeEntry
+          ? `Theme files were copied into your OBS themes folder, but ${APP_NAME} could not fully verify that OBS can load this theme.`
+          : isStandaloneTool
+            ? 'The files are present, but the last setup step still needs to be completed before this tool is fully ready.'
+            : `The install started, but ${APP_NAME} could not verify the final plugin files yet.`
   } else if (hasUpdate) {
     statusLabel = 'Update available'
     statusTone = 'warning'
@@ -138,18 +150,18 @@ function buildTrackedPluginRow(
   } else if (isExternalInstall) {
     statusTone = 'neutral'
     helperText =
-      'This plugin was installed outside OBS Plugin Installer. Because it was not fully installed by the app, it cannot be removed automatically from here. To uninstall this plugin, use your system\'s app manager or the plugin\'s own uninstaller.'
+      `This plugin was installed outside ${APP_NAME}. Because it was not fully installed by the app, it cannot be removed automatically from here. To uninstall this plugin, use your system's app manager or the plugin's own uninstaller.`
   } else if (isInstallerInstall) {
     statusTone = 'neutral'
     helperText =
-      'This plugin was installed using an external installer. OBS Plugin Installer helped start the installation, but the plugin was installed by its own installer. Because of that, it cannot be removed automatically from here. To uninstall this plugin, use your system\'s app manager or the plugin\'s own uninstaller.'
+      `This plugin was installed using an external installer. ${APP_NAME} helped start the installation, but the plugin was installed by its own installer. Because of that, it cannot be removed automatically from here. To uninstall this plugin, use your system's app manager or the plugin's own uninstaller.`
   }
 
   let deleteDisabledReason: string | null = null
   if (!canDelete) {
     deleteDisabledReason = isExternalInstall
-      ? 'This copy was detected in OBS and was not installed by OBS Plugin Installer, so automatic removal is unavailable.'
-      : 'OBS Plugin Installer cannot remove this install automatically because it does not have a safe tracked file list to delete.'
+      ? `This copy was detected in OBS and was not installed by ${APP_NAME}, so automatic removal is unavailable.`
+      : `${APP_NAME} cannot remove this install automatically because it does not have a safe tracked file list to delete.`
   }
 
   return {
@@ -169,7 +181,8 @@ function buildTrackedPluginRow(
     isScriptEntry,
     isStandaloneTool,
     isScriptAttachPending,
-    resolvedEntryFiles,
+    installLocations,
+    primaryInstallLocation,
     canDelete,
     deleteDisabledReason,
   }
@@ -348,6 +361,13 @@ export function InstalledPage() {
   function renderTrackedRow(row: TrackedPluginRow) {
     const sourcePage = getSourcePage(row.plugin)
     const canRetry = row.compatibility.canInstall
+    const openPrimaryInstallLocation = () => {
+      if (!row.primaryInstallLocation) {
+        return
+      }
+
+      void revealPath(row.primaryInstallLocation.path)
+    }
     const manualUninstallTooltip =
       'This plugin must be removed using your system or the plugin installer.'
     const canOpenManualFix =
@@ -447,21 +467,12 @@ export function InstalledPage() {
               ) : null}
             </div>
 
-            {row.isScriptEntry && row.installedPlugin.downloadPath ? (
+            {row.installLocations.length ? (
               <div className="pointer-events-auto">
-                <CopyPathField
-                  buttonClassName="h-7 w-7"
-                  codeClassName="rounded-md px-2 py-1 text-[11px] leading-5"
-                  value={row.installedPlugin.downloadPath}
-                />
-              </div>
-            ) : null}
-            {!row.isScriptEntry && row.resolvedEntryFiles.length ? (
-              <div className="pointer-events-auto">
-                <CopyPathField
-                  buttonClassName="h-7 w-7"
-                  codeClassName="rounded-md px-2 py-1 text-[11px] leading-5"
-                  value={row.resolvedEntryFiles[0].absolutePath}
+                <InstallLocationSection
+                  locations={row.installLocations}
+                  title="Installed location"
+                  onOpenLocation={(path) => void revealPath(path)}
                 />
               </div>
             ) : null}
@@ -526,10 +537,20 @@ export function InstalledPage() {
               <Button
                 size="sm"
                 variant="outline"
-                onClick={() => void revealPath(row.installedPlugin.installLocation)}
+                onClick={openPrimaryInstallLocation}
               >
                 <FolderOpen className="size-4" />
                 Open Scripts Folder
+              </Button>
+            ) : null}
+            {!row.isScriptEntry && row.primaryInstallLocation ? (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={openPrimaryInstallLocation}
+              >
+                <FolderOpen className="size-4" />
+                {row.primaryInstallLocation.openLabel}
               </Button>
             ) : null}
             {row.canDelete ? (
@@ -673,7 +694,7 @@ export function InstalledPage() {
           <section className="overflow-hidden rounded-[32px] border border-white/10 bg-white/[0.04] shadow-panel">
             <div className="p-6">
               <EmptyState
-                description="Installed plugins, broken installs, and removed plugins appear here after OBS Plugin Installer tracks them."
+                description={`Installed plugins, broken installs, and removed plugins appear here after ${APP_NAME} tracks them.`}
                 icon={<PackageOpen className="size-5" />}
                 primaryAction={{
                   label: 'Browse plugins',

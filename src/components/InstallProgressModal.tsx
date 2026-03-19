@@ -14,11 +14,14 @@ import type { InstallProgressEvent, InstallResponse } from '../types/desktop'
 import type { PluginCatalogEntry } from '../types/plugin'
 import { resolveInstallModalState } from '../lib/installProgress'
 import {
+  getInstalledThemeLayout,
   getPluginTypeLabel,
   isScriptPlugin,
   isThemeResource,
+  resolveInstalledLocationEntries,
   resolvePrimaryEntryFiles,
 } from '../lib/utils'
+import { InstallLocationSection } from './InstallLocationSection'
 import { ConfirmDialog } from './ui/ConfirmDialog'
 import { Badge } from './ui/Badge'
 import { Button } from './ui/Button'
@@ -33,7 +36,7 @@ interface InstallProgressModalProps {
   onHide: () => void
   onClear: () => void
   onCancelInstall?: () => void
-  onOpenInstallFolder?: () => void
+  onOpenInstallLocation?: (path: string) => void
   onOpenInstallerManually?: () => void
   onOpenSource?: () => void
   onViewPlugin?: () => void
@@ -111,7 +114,7 @@ export function InstallProgressModal({
   onClear,
   onHide,
   onCancelInstall,
-  onOpenInstallFolder,
+  onOpenInstallLocation,
   onOpenInstallerManually,
   onOpenSource,
   onViewPlugin,
@@ -163,14 +166,20 @@ export function InstallProgressModal({
         null)
       : null
   const resolvedEntryFiles = resolvePrimaryEntryFiles(plugin, lastResponse?.installedPlugin)
-  const installLocation = lastResponse?.installedPlugin?.installLocation ?? null
+  const installLocationEntries = resolveInstalledLocationEntries(plugin, lastResponse?.installedPlugin)
+  const primaryInstallLocation =
+    installLocationEntries.find((entry) => entry.isPrimary) ?? installLocationEntries[0] ?? null
+  const themeLayout = getInstalledThemeLayout(lastResponse?.installedPlugin)
+  const needsFollowup =
+    lastResponse?.installedPlugin?.status === 'manual-step' ||
+    lastResponse?.installedPlugin?.verificationStatus === 'unverified' ||
+    lastResponse?.installedPlugin?.verificationStatus === 'missing-files'
   const hasBundleFollowup =
     isSuccess &&
     !isScriptInstall &&
     Boolean(plugin?.obsFollowupSteps?.length || resolvedEntryFiles.length)
   const canOpenInstalledLocation =
-    Boolean(onOpenInstallFolder) &&
-    (resolvedEntryFiles.length > 0 || Boolean(installLocation) || isThemeInstall)
+    Boolean(onOpenInstallLocation) && Boolean(primaryInstallLocation)
   const handleDismiss = () => {
     if (isActiveInstall) {
       onHide()
@@ -199,6 +208,10 @@ export function InstallProgressModal({
 
     if (isSuccess && isScriptInstall) {
       return 'OBS Script Installed'
+    }
+
+    if (isSuccess && needsFollowup) {
+      return isThemeInstall ? 'Theme copied with follow-up required' : 'Install completed with follow-up required'
     }
 
     if (isSuccess) {
@@ -259,10 +272,13 @@ export function InstallProgressModal({
             ) : null}
 
             <div className="flex flex-wrap gap-2">
-              {onOpenInstallFolder ? (
-                <Button variant="secondary" onClick={onOpenInstallFolder}>
+              {primaryInstallLocation ? (
+                <Button
+                  variant="secondary"
+                  onClick={() => onOpenInstallLocation?.(primaryInstallLocation.path)}
+                >
                   <FolderOpen className="size-4" />
-                  Open Scripts Folder
+                  {primaryInstallLocation.openLabel}
                 </Button>
               ) : null}
               {onViewPlugin ? (
@@ -389,9 +405,20 @@ export function InstallProgressModal({
                 </div>
               </div>
             ) : isSuccess ? (
-              <div className="space-y-4">
-                <div className="flex items-start gap-3 rounded-lg border border-emerald-400/20 bg-emerald-500/10 p-4">
-                  <CheckCircle2 className="mt-0.5 size-5 text-emerald-300" />
+                <div className="space-y-4">
+                <div
+                  className={[
+                    'flex items-start gap-3 rounded-lg border p-4',
+                    needsFollowup
+                      ? 'border-amber-400/20 bg-amber-500/10'
+                      : 'border-emerald-400/20 bg-emerald-500/10',
+                  ].join(' ')}
+                >
+                  {needsFollowup ? (
+                    <AlertCircle className="mt-0.5 size-5 text-amber-300" />
+                  ) : (
+                    <CheckCircle2 className="mt-0.5 size-5 text-emerald-300" />
+                  )}
                   <div>
                     <p className="text-sm font-semibold text-white">
                       {lastResponse?.message ?? 'The install completed successfully.'}
@@ -401,16 +428,23 @@ export function InstallProgressModal({
                     </p>
                   </div>
                 </div>
-                {isThemeInstall && installLocation ? (
-                  <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
-                      OBS theme folder
-                    </p>
-                    <p className="mt-2 text-sm text-slate-300">
-                      Theme files were installed into your OBS theme directory.
-                    </p>
-                    <CopyPathField className="mt-3" value={installLocation} />
-                  </div>
+                {installLocationEntries.length ? (
+                  <InstallLocationSection
+                    description={
+                      isThemeInstall
+                        ? themeLayout === 'legacy-qss'
+                          ? 'Installed as an OBS theme package in your OBS themes folder. This package uses the legacy .qss theme format.'
+                          : 'Installed as an OBS theme package in your OBS themes folder.'
+                        : 'These are the tracked install locations for the completed install.'
+                    }
+                    locations={installLocationEntries}
+                    title="Installed location"
+                    onOpenLocation={
+                      onOpenInstallLocation
+                        ? (path) => onOpenInstallLocation(path)
+                        : undefined
+                    }
+                  />
                 ) : null}
                 {hasBundleFollowup ? (
                   <div className="rounded-lg border border-white/10 bg-white/[0.03] p-4">
@@ -436,10 +470,13 @@ export function InstallProgressModal({
                   </div>
                 ) : null}
                 <div className="flex flex-wrap gap-2">
-                  {onOpenInstallFolder && canOpenInstalledLocation ? (
-                    <Button variant="secondary" onClick={onOpenInstallFolder}>
+                  {canOpenInstalledLocation && primaryInstallLocation ? (
+                    <Button
+                      variant="secondary"
+                      onClick={() => onOpenInstallLocation?.(primaryInstallLocation.path)}
+                    >
                       <FolderOpen className="size-4" />
-                      {isThemeInstall ? 'Open Theme Folder' : 'Open Installed Folder'}
+                      {primaryInstallLocation.openLabel}
                     </Button>
                   ) : null}
                   {onViewPlugin ? (

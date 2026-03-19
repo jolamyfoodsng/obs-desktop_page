@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 
 use chrono::Utc;
+use semver::Version;
 use tauri::AppHandle;
 use walkdir::WalkDir;
 
@@ -11,9 +12,9 @@ use crate::commands::store::{load_state, push_install_history, save_state};
 use crate::commands::validate_obs::validate_obs_path;
 use crate::models::plugin::{PluginCatalogEntry, ResourceInstallType, SupportedPlatform};
 use crate::models::state::{
-    BootstrapPayload, InstallHistoryAction, InstallHistoryEntry, InstallKind,
-    InstallMethod, InstallVerificationStatus, InstalledPluginRecord,
-    InstalledPluginSourceType, InstalledPluginStatus, PersistedState,
+    BootstrapPayload, InstallHistoryAction, InstallHistoryEntry, InstallKind, InstallMethod,
+    InstallVerificationStatus, InstalledPluginRecord, InstalledPluginSourceType,
+    InstalledPluginStatus, PersistedState,
 };
 use crate::utils::catalog::load_plugin_catalog;
 
@@ -60,25 +61,93 @@ pub fn tracked_path_candidates(
     candidates
 }
 
-fn refresh_installed_records(records: &mut [InstalledPluginRecord]) -> bool {
+fn normalize_obs_version(value: &str) -> Option<Version> {
+    Version::parse(value.trim_start_matches('v').trim()).ok()
+}
+
+fn is_theme_plugin(plugin: &PluginCatalogEntry) -> bool {
+    plugin.resource_type.as_deref() == Some("theme")
+        || plugin.category.eq_ignore_ascii_case("themes")
+        || matches!(
+            plugin.resource_install_type,
+            Some(ResourceInstallType::ThemeBundle)
+        )
+}
+
+fn theme_path_extension(path: &str) -> Option<String> {
+    Path::new(path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+}
+
+fn theme_path_is_root(path: &str) -> bool {
+    Path::new(path).components().count() == 1
+}
+
+fn theme_has_descriptor(tracked_files: &[String], extensions: &[&str], root_only: bool) -> bool {
+    tracked_files.iter().any(|relative_path| {
+        let matches_extension = theme_path_extension(relative_path)
+            .is_some_and(|extension| extensions.iter().any(|candidate| extension == *candidate));
+
+        matches_extension && (!root_only || theme_path_is_root(relative_path))
+    })
+}
+
+fn theme_uses_legacy_qss_only(record: &InstalledPluginRecord) -> bool {
+    let has_qss = theme_has_descriptor(&record.installed_files, &["qss"], true);
+    let has_modern_descriptor =
+        theme_has_descriptor(&record.installed_files, &["obt", "ovt"], false);
+
+    has_qss && !has_modern_descriptor
+}
+
+fn obs_prefers_modern_theme_descriptors(obs_version: Option<&str>) -> bool {
+    obs_version
+        .and_then(normalize_obs_version)
+        .is_some_and(|version| version >= Version::new(30, 2, 0))
+}
+
+fn record_requires_theme_followup(
+    record: &InstalledPluginRecord,
+    plugins: &[PluginCatalogEntry],
+    obs_version: Option<&str>,
+) -> bool {
+    if !obs_prefers_modern_theme_descriptors(obs_version) {
+        return false;
+    }
+
+    let Some(plugin) = plugins.iter().find(|plugin| plugin.id == record.plugin_id) else {
+        return false;
+    };
+
+    is_theme_plugin(plugin) && theme_uses_legacy_qss_only(record)
+}
+
+fn refresh_installed_records(
+    records: &mut [InstalledPluginRecord],
+    plugins: &[PluginCatalogEntry],
+    obs_version: Option<&str>,
+) -> bool {
     let mut changed = false;
     let verified_at = Utc::now().to_rfc3339();
 
     for record in records.iter_mut() {
         let mut record_changed = false;
-        if record.status == InstalledPluginStatus::ManualStep {
+        let requires_theme_followup = record_requires_theme_followup(record, plugins, obs_version);
+
+        if record.status == InstalledPluginStatus::ManualStep || requires_theme_followup {
             let has_tracked_files = !record.installed_files.is_empty();
             let all_files_exist = has_tracked_files
-                && record
-                    .installed_files
-                    .iter()
-                    .all(|relative_path| {
-                        tracked_path_candidates(record, relative_path)
-                            .iter()
-                            .any(|candidate| candidate.exists())
-                    });
+                && record.installed_files.iter().all(|relative_path| {
+                    tracked_path_candidates(record, relative_path)
+                        .iter()
+                        .any(|candidate| candidate.exists())
+                });
 
             let next_verification_status = if !has_tracked_files {
+                InstallVerificationStatus::Unverified
+            } else if requires_theme_followup && all_files_exist {
                 InstallVerificationStatus::Unverified
             } else if all_files_exist {
                 InstallVerificationStatus::Verified
@@ -91,6 +160,11 @@ fn refresh_installed_records(records: &mut [InstalledPluginRecord]) -> bool {
                 && record.status != InstalledPluginStatus::MissingFiles
             {
                 record.status = InstalledPluginStatus::MissingFiles;
+                record_changed = true;
+            } else if requires_theme_followup && record.status != InstalledPluginStatus::ManualStep
+            {
+                record.status = InstalledPluginStatus::ManualStep;
+                record.install_kind = InstallKind::Guided;
                 record_changed = true;
             }
             if record.verification_status != Some(next_verification_status.clone()) {
@@ -105,14 +179,11 @@ fn refresh_installed_records(records: &mut [InstalledPluginRecord]) -> bool {
             continue;
         }
 
-        let all_files_exist = record
-            .installed_files
-            .iter()
-            .all(|relative_path| {
-                tracked_path_candidates(record, relative_path)
-                    .iter()
-                    .any(|candidate| candidate.exists())
-            });
+        let all_files_exist = record.installed_files.iter().all(|relative_path| {
+            tracked_path_candidates(record, relative_path)
+                .iter()
+                .any(|candidate| candidate.exists())
+        });
 
         let next_status = if all_files_exist {
             InstalledPluginStatus::Installed
@@ -405,7 +476,9 @@ fn detect_external_record(
     })
 }
 
-fn external_scan_roots(settings: &crate::models::state::AppSettings) -> Vec<(ScanRootKind, PathBuf)> {
+fn external_scan_roots(
+    settings: &crate::models::state::AppSettings,
+) -> Vec<(ScanRootKind, PathBuf)> {
     let Some(obs_path) = settings.obs_path.as_ref() else {
         return Vec::new();
     };
@@ -422,7 +495,8 @@ fn external_scan_roots(settings: &crate::models::state::AppSettings) -> Vec<(Sca
     let mut roots = Vec::new();
     roots.push((ScanRootKind::ObsPlugin, resolved.install_target_path));
 
-    if let Ok(scripts_root) = managed_script_root(&resolved.selected_path, &resolved.validation_kind)
+    if let Ok(scripts_root) =
+        managed_script_root(&resolved.selected_path, &resolved.validation_kind)
     {
         roots.push((ScanRootKind::Script, scripts_root));
     }
@@ -640,8 +714,14 @@ fn sync_install_statuses(app: &AppHandle, mut state: PersistedState) -> Persiste
         .values()
         .cloned()
         .collect::<Vec<_>>();
+    let plugins = load_plugin_catalog().unwrap_or_default();
+    let detection = detect_obs_installation(app, &state.settings);
 
-    let changed = refresh_installed_records(&mut installed_plugins);
+    let changed = refresh_installed_records(
+        &mut installed_plugins,
+        &plugins,
+        detection.obs_version.as_deref(),
+    );
 
     if changed {
         state.installed_plugins.clear();
@@ -693,7 +773,10 @@ pub fn bootstrap(app: AppHandle) -> Result<BootstrapPayload, String> {
 }
 
 #[tauri::command]
-pub fn adopt_installation(app: AppHandle, plugin_id: String) -> Result<InstalledPluginRecord, String> {
+pub fn adopt_installation(
+    app: AppHandle,
+    plugin_id: String,
+) -> Result<InstalledPluginRecord, String> {
     let mut state = load_state(&app).map_err(|error| error.to_string())?;
 
     if let Some(existing) = state.installed_plugins.get(&plugin_id) {
@@ -704,7 +787,9 @@ pub fn adopt_installation(app: AppHandle, plugin_id: String) -> Result<Installed
     let external = scan_external_installations(&state.settings, &plugins)
         .into_iter()
         .find(|record| record.plugin_id == plugin_id && !record.managed)
-        .ok_or_else(|| "No adoptable external installation was detected for that plugin.".to_string())?;
+        .ok_or_else(|| {
+            "No adoptable external installation was detected for that plugin.".to_string()
+        })?;
 
     let mut adopted = external;
     adopted.managed = true;
@@ -727,13 +812,14 @@ pub fn adopt_installation(app: AppHandle, plugin_id: String) -> Result<Installed
             message: "The existing OBS installation was adopted into managed state.".to_string(),
             timestamp: Utc::now().to_rfc3339(),
             file_count: adopted.installed_files.len(),
-            backup_root: adopted.backup.as_ref().map(|backup| backup.backup_root.clone()),
+            backup_root: adopted
+                .backup
+                .as_ref()
+                .map(|backup| backup.backup_root.clone()),
             verification_status: adopted.verification_status.clone(),
         },
     );
-    state
-        .installed_plugins
-        .insert(plugin_id, adopted.clone());
+    state.installed_plugins.insert(plugin_id, adopted.clone());
     save_state(&app, &state).map_err(|error| error.to_string())?;
 
     Ok(adopted)

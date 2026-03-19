@@ -12,6 +12,7 @@ import { useParams } from 'react-router-dom'
 import { Badge } from '../components/ui/Badge'
 import { Button } from '../components/ui/Button'
 import { CopyPathField } from '../components/ui/CopyPathField'
+import { InstallLocationSection } from '../components/InstallLocationSection'
 import { getPluginAnalyticsProperties, trackEvent } from '../lib/analytics'
 import { getErrorMessage } from '../lib/errors'
 import { PluginGlyph } from '../lib/pluginVisuals'
@@ -22,6 +23,7 @@ import {
   getCatalogPluginState,
   getGitHubReleasesUrl,
   getGitHubRepoUrl,
+  getInstalledThemeLayout,
   getInstallMethod,
   getInstallOwnershipLabel,
   getPlatformPackages,
@@ -30,6 +32,8 @@ import {
   getRecommendedPackage,
   hasGitHubReleaseSource,
   isScriptPlugin,
+  isThemeResource,
+  resolveInstalledLocationEntries,
   resolvePrimaryEntryFiles,
 } from '../lib/utils'
 import { useAppStore } from '../stores/appStore'
@@ -43,6 +47,7 @@ export function PluginDetailsPage() {
   const adoptInstallation = useAppStore((state) => state.adoptInstallation)
   const adoptingPluginId = useAppStore((state) => state.adoptingPluginId)
   const openExternal = useAppStore((state) => state.openExternal)
+  const revealPath = useAppStore((state) => state.revealPath)
 
   const plugin = bootstrap?.plugins.find((entry) => entry.id === pluginId)
   const installedPlugin = bootstrap?.installedPlugins.find(
@@ -176,6 +181,12 @@ export function PluginDetailsPage() {
   const isScriptEntry = isScriptPlugin(plugin, installedPlugin, selectedGitHubAsset?.name)
   const pluginTypeLabel = getPluginTypeLabel(plugin, installedPlugin, selectedGitHubAsset?.name)
   const resolvedEntryFiles = resolvePrimaryEntryFiles(plugin, installedPlugin)
+  const installLocations = resolveInstalledLocationEntries(plugin, installedPlugin)
+  const installedThemeLayout = getInstalledThemeLayout(installedPlugin)
+  const themeNeedsAttention =
+    isThemeResource(plugin) &&
+    installedPlugin?.status === 'manual-step' &&
+    installedThemeLayout === 'legacy-qss'
   const releaseCheckPending =
     isReleaseLoading &&
     !recommendedPackage &&
@@ -395,6 +406,34 @@ export function PluginDetailsPage() {
                       <li key={step}>{step}</li>
                     ))}
                   </ul>
+                </div>
+              ) : null}
+
+              {themeNeedsAttention ? (
+                <div className="mt-4 rounded-lg border border-amber-400/20 bg-amber-500/10 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-amber-200">
+                    Theme compatibility note
+                  </p>
+                  <p className="mt-2 text-sm leading-7 text-slate-100">
+                    This theme was installed into your OBS themes folder, but the package only includes a
+                    legacy <code>.qss</code> theme file. Recent OBS builds use <code>.obt</code> /{' '}
+                    <code>.ovt</code> theme descriptors, so this theme may not appear in OBS even after a restart.
+                  </p>
+                </div>
+              ) : null}
+
+              {installLocations.length ? (
+                <div className="mt-4">
+                  <InstallLocationSection
+                    description={
+                      isThemeResource(plugin)
+                        ? 'Installed as an OBS theme package. These are the tracked theme locations on this machine.'
+                        : 'These are the tracked install locations for the current resource.'
+                    }
+                    locations={installLocations}
+                    title="Installed location"
+                    onOpenLocation={(path) => void revealPath(path)}
+                  />
                 </div>
               ) : null}
 

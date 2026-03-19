@@ -10,6 +10,7 @@ use std::sync::{
 use chrono::Utc;
 use reqwest::blocking::{Client, Response};
 use reqwest::header::{CONTENT_DISPOSITION, CONTENT_TYPE};
+use semver::Version;
 use serde::Deserialize;
 use tauri::{AppHandle, Emitter, Manager};
 use tempfile::Builder;
@@ -1361,6 +1362,43 @@ fn is_theme_resource(plugin: &PluginCatalogEntry) -> bool {
         )
 }
 
+fn normalize_obs_version(value: &str) -> Option<Version> {
+    Version::parse(value.trim_start_matches('v').trim()).ok()
+}
+
+fn theme_path_extension(path: &str) -> Option<String> {
+    Path::new(path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+}
+
+fn theme_path_is_root(path: &str) -> bool {
+    Path::new(path).components().count() == 1
+}
+
+fn theme_has_descriptor(tracked_files: &[String], extensions: &[&str], root_only: bool) -> bool {
+    tracked_files.iter().any(|relative_path| {
+        let matches_extension = theme_path_extension(relative_path)
+            .is_some_and(|extension| extensions.iter().any(|candidate| extension == *candidate));
+
+        matches_extension && (!root_only || theme_path_is_root(relative_path))
+    })
+}
+
+fn theme_uses_legacy_qss_only(tracked_files: &[String]) -> bool {
+    let has_qss = theme_has_descriptor(tracked_files, &["qss"], true);
+    let has_modern_descriptor = theme_has_descriptor(tracked_files, &["obt", "ovt"], false);
+
+    has_qss && !has_modern_descriptor
+}
+
+fn obs_prefers_modern_theme_descriptors(obs_version: Option<&str>) -> bool {
+    obs_version
+        .and_then(normalize_obs_version)
+        .is_some_and(|version| version >= Version::new(30, 2, 0))
+}
+
 pub(crate) fn managed_theme_root(
     selected_obs_path: &Path,
     validation_kind: &str,
@@ -1398,9 +1436,31 @@ fn requires_post_install_setup(plugin: &PluginCatalogEntry) -> bool {
 
 fn build_theme_install_message(theme_root: &Path, plugin: &PluginCatalogEntry) -> String {
     format!(
-        "{} was installed into the OBS theme folder at {}. Open OBS Settings -> General -> Theme to select it.",
+        "{} was installed as an OBS theme into {}. Open OBS Settings -> General to select it.",
         plugin.name,
         theme_root.display()
+    )
+}
+
+fn build_legacy_theme_followup_message(
+    theme_root: &Path,
+    plugin: &PluginCatalogEntry,
+    obs_version: Option<&str>,
+) -> String {
+    let compatibility_detail = if let Some(version) = obs_version {
+        format!(
+            "OBS {} expects .obt/.ovt theme files for the theme picker.",
+            version
+        )
+    } else {
+        "Recent OBS builds expect .obt/.ovt theme files for the theme picker.".to_string()
+    };
+
+    format!(
+        "{} was installed as an OBS theme into {}, but this package only includes a legacy .qss theme. {} The theme may not appear in OBS. Review the source page for an updated package or manual instructions.",
+        plugin.name,
+        theme_root.display(),
+        compatibility_detail
     )
 }
 
@@ -2355,6 +2415,7 @@ fn finalize_archive_download(
                     plugin,
                     operations,
                     &theme_root,
+                    resolved_obs.obs_version.as_deref(),
                     overwrite,
                     package_id,
                     token,
@@ -2462,6 +2523,7 @@ fn finalize_archive_download(
                 plugin,
                 operations,
                 &theme_root,
+                resolved_obs.obs_version.as_deref(),
                 overwrite,
                 package_id,
                 token,
@@ -2495,6 +2557,7 @@ fn finalize_theme_archive_install(
     plugin: &PluginCatalogEntry,
     operations: Vec<InstallCopyOperation>,
     theme_root: &Path,
+    obs_version: Option<&str>,
     overwrite: bool,
     package_id: Option<String>,
     token: &Arc<AtomicBool>,
@@ -2546,6 +2609,39 @@ fn finalize_theme_archive_install(
         return Ok(response);
     }
 
+    let requires_followup = theme_uses_legacy_qss_only(&copy_outcome.tracked_files)
+        && obs_prefers_modern_theme_descriptors(obs_version);
+    let install_message = if requires_followup {
+        build_legacy_theme_followup_message(theme_root, plugin, obs_version)
+    } else {
+        success_message
+    };
+    let install_status = if requires_followup {
+        InstalledPluginStatus::ManualStep
+    } else {
+        InstalledPluginStatus::Installed
+    };
+    let install_kind = if requires_followup {
+        InstallKind::Guided
+    } else {
+        InstallKind::Full
+    };
+    let verification_status = if requires_followup {
+        InstallVerificationStatus::Unverified
+    } else {
+        InstallVerificationStatus::Verified
+    };
+
+    if requires_followup {
+        log::warn!(
+            "theme install requires follow-up: plugin={} obs_version={:?} destination={} tracked_files={}",
+            plugin.id,
+            obs_version,
+            theme_root.display(),
+            copy_outcome.tracked_files.len()
+        );
+    }
+
     let mut state = load_state(app)?;
     let previous_record = state.installed_plugins.get(&plugin.id).cloned();
     let installed_plugin = InstalledPluginRecord {
@@ -2555,14 +2651,14 @@ fn finalize_theme_archive_install(
         managed: true,
         install_location: theme_root.display().to_string(),
         installed_files: copy_outcome.tracked_files.clone(),
-        status: InstalledPluginStatus::Installed,
+        status: install_status,
         source_type: InstalledPluginSourceType::Archive,
-        install_kind: InstallKind::Full,
+        install_kind,
         package_id,
         download_path: None,
         install_method: Some(InstallMethod::Managed),
         backup: build_install_backup_record(&copy_outcome),
-        verification_status: Some(InstallVerificationStatus::Verified),
+        verification_status: Some(verification_status.clone()),
         last_verified_at: Some(Utc::now().to_rfc3339()),
     };
     push_install_history(
@@ -2574,14 +2670,18 @@ fn finalize_theme_archive_install(
             action: infer_install_history_action(previous_record.as_ref(), &plugin.version),
             managed: true,
             install_location: Some(theme_root.display().to_string()),
-            message: "Managed OBS theme install completed and verification passed.".to_string(),
+            message: if requires_followup {
+                "Managed OBS theme install completed, but the package uses the legacy .qss theme format and may not appear in this OBS build.".to_string()
+            } else {
+                "Managed OBS theme install completed and verification passed.".to_string()
+            },
             timestamp: Utc::now().to_rfc3339(),
             file_count: copy_outcome.tracked_files.len(),
             backup_root: installed_plugin
                 .backup
                 .as_ref()
                 .map(|backup| backup.backup_root.clone()),
-            verification_status: Some(InstallVerificationStatus::Verified),
+            verification_status: Some(verification_status),
         },
     );
     state
@@ -2601,15 +2701,19 @@ fn finalize_theme_archive_install(
         &plugin.id,
         "completed",
         100,
-        format!("{} installed successfully", plugin.name),
-        Some(success_message.clone()),
+        if requires_followup {
+            format!("{} installed with follow-up required", plugin.name)
+        } else {
+            format!("{} installed successfully", plugin.name)
+        },
+        Some(install_message.clone()),
         true,
     );
 
     Ok(InstallResponse {
         success: true,
         code: None,
-        message: success_message,
+        message: install_message,
         installed_plugin: Some(installed_plugin),
         manual_installer_path: None,
         download_path: None,

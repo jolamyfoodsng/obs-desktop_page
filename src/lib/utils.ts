@@ -1,6 +1,7 @@
 import clsx from 'clsx'
 import semver from 'semver'
 
+import { APP_NAME } from './branding'
 import type {
   GitHubReleaseInfo,
   InstallMethod,
@@ -99,6 +100,260 @@ export function resolvePrimaryEntryFiles(
       fileUrl: toFileUrlPath(absolutePath),
     }
   })
+}
+
+export interface InstalledLocationEntry {
+  id: string
+  label: string
+  path: string
+  openLabel: string
+  description?: string | null
+  isPrimary?: boolean
+}
+
+export type InstalledThemeLayout = 'modern' | 'legacy-qss' | 'unknown'
+
+function normalizeRelativeInstallPath(value: string) {
+  return value.replace(/^[/\\]+/, '').replace(/\\/g, '/').replace(/\/+/g, '/')
+}
+
+function splitRelativeInstallPath(value: string) {
+  return normalizeRelativeInstallPath(value).split('/').filter(Boolean)
+}
+
+function joinInstallPath(basePath: string, ...segments: string[]) {
+  const separator = basePath.includes('\\') ? '\\' : '/'
+  const sanitizedBase = basePath.replace(/[\\/]+$/, '')
+  const sanitizedSegments = segments
+    .map((segment) =>
+      segment
+        .replace(/^[/\\]+|[/\\]+$/g, '')
+        .replace(/[\\/]+/g, separator),
+    )
+    .filter(Boolean)
+
+  return [sanitizedBase, ...sanitizedSegments].filter(Boolean).join(separator)
+}
+
+function normalizePathForComparison(value: string) {
+  return value.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/$/, '').toLowerCase()
+}
+
+function dedupeInstalledLocationEntries(entries: InstalledLocationEntry[]) {
+  const seen = new Set<string>()
+
+  return entries.filter((entry) => {
+    const key = `${entry.label}:${normalizePathForComparison(entry.path)}`
+    if (seen.has(key)) {
+      return false
+    }
+
+    seen.add(key)
+    return true
+  })
+}
+
+function detectModuleRootSegment(
+  plugin: PluginCatalogEntry,
+  installedPlugin: Pick<InstalledPluginRecord, 'installedFiles'>,
+) {
+  const normalizedCandidates = new Set(
+    [plugin.moduleName, ...(plugin.installStrategy?.moduleNameAliases ?? [])]
+      .map((value) => value.trim().toLowerCase())
+      .filter(Boolean),
+  )
+
+  for (const relativePath of installedPlugin.installedFiles) {
+    const [firstSegment, secondSegment] = splitRelativeInstallPath(relativePath)
+    if (!firstSegment) {
+      continue
+    }
+
+    if (normalizedCandidates.has(firstSegment.toLowerCase())) {
+      return firstSegment
+    }
+
+    if (secondSegment === 'bin' || secondSegment === 'data') {
+      return firstSegment
+    }
+  }
+
+  return splitRelativeInstallPath(installedPlugin.installedFiles[0] ?? '')[0] ?? null
+}
+
+export function getInstalledThemeLayout(
+  installedPlugin?: Pick<InstalledPluginRecord, 'installedFiles'> | null,
+): InstalledThemeLayout {
+  const trackedFiles = installedPlugin?.installedFiles ?? []
+  const hasModernDescriptor = trackedFiles.some((relativePath) =>
+    /\.(obt|ovt)$/i.test(relativePath),
+  )
+  const hasLegacyStylesheet = trackedFiles.some((relativePath) => /\.qss$/i.test(relativePath))
+
+  if (hasModernDescriptor) {
+    return 'modern'
+  }
+
+  if (hasLegacyStylesheet) {
+    return 'legacy-qss'
+  }
+
+  return 'unknown'
+}
+
+export function resolveInstalledLocationEntries(
+  plugin?: PluginCatalogEntry | null,
+  installedPlugin?:
+    | Pick<
+        InstalledPluginRecord,
+        'downloadPath' | 'installLocation' | 'installedFiles' | 'sourceType'
+      >
+    | null,
+) {
+  if (!installedPlugin?.installLocation) {
+    return [] as InstalledLocationEntry[]
+  }
+
+  if (isThemeResource(plugin)) {
+    const themeLayout = getInstalledThemeLayout(installedPlugin)
+
+    return [
+      {
+        id: 'theme-path',
+        label: 'Theme path',
+        path: installedPlugin.installLocation,
+        openLabel: 'Open Theme Folder',
+        description:
+          themeLayout === 'legacy-qss'
+            ? 'Installed as an OBS theme in your OBS themes directory. This package only includes a legacy .qss theme file.'
+            : 'Installed as an OBS theme in your OBS themes directory.',
+        isPrimary: true,
+      },
+    ]
+  }
+
+  if (installedPlugin.sourceType === 'script') {
+    return [
+      {
+        id: 'scripts-path',
+        label: 'Scripts path',
+        path: installedPlugin.installLocation,
+        openLabel: 'Open Scripts Folder',
+        description: 'Installed into your OBS scripts directory.',
+        isPrimary: true,
+      },
+    ]
+  }
+
+  if (installedPlugin.sourceType === 'standalone-tool') {
+    return [
+      {
+        id: 'managed-tools-path',
+        label: 'Managed tools path',
+        path: installedPlugin.installLocation,
+        openLabel: 'Open Tool Folder',
+        description: `Managed by ${APP_NAME} in the desktop tools library.`,
+        isPrimary: true,
+      },
+    ]
+  }
+
+  if (plugin && installedPlugin.sourceType === 'archive' && installedPlugin.installedFiles.length > 0) {
+    const moduleRoot = detectModuleRootSegment(plugin, installedPlugin)
+    const relativeFiles = installedPlugin.installedFiles.map(splitRelativeInstallPath)
+    const entries: InstalledLocationEntry[] = []
+
+    if (moduleRoot) {
+      const hasPluginBinPath = relativeFiles.some(
+        ([firstSegment, secondSegment]) =>
+          firstSegment === moduleRoot && secondSegment === 'bin',
+      )
+      const hasPluginDataPath = relativeFiles.some(
+        ([firstSegment, secondSegment]) =>
+          firstSegment === moduleRoot && secondSegment === 'data',
+      )
+      const hasModuleRootFiles = relativeFiles.some(
+        ([firstSegment, secondSegment]) =>
+          firstSegment === moduleRoot && secondSegment && secondSegment !== 'bin' && secondSegment !== 'data',
+      )
+
+      if (hasPluginBinPath) {
+        entries.push({
+          id: 'plugin-binary-path',
+          label: 'Plugin binary path',
+          path: joinInstallPath(installedPlugin.installLocation, moduleRoot, 'bin'),
+          openLabel: 'Open Plugin Folder',
+          description: 'OBS loads the plugin binaries from this folder.',
+          isPrimary: true,
+        })
+      }
+
+      if (hasPluginDataPath) {
+        entries.push({
+          id: 'plugin-data-path',
+          label: 'Data path',
+          path: joinInstallPath(installedPlugin.installLocation, moduleRoot, 'data'),
+          openLabel: 'Open Data Folder',
+          description: 'Plugin resources and support files are installed here.',
+        })
+      }
+
+      if (!hasPluginBinPath || hasModuleRootFiles) {
+        entries.push({
+          id: 'plugin-install-path',
+          label: hasPluginBinPath ? 'Plugin root path' : 'Install path',
+          path: joinInstallPath(installedPlugin.installLocation, moduleRoot),
+          openLabel: 'Open Install Folder',
+          description: hasPluginBinPath
+            ? 'The managed plugin bundle lives under this root.'
+            : 'Installed into your OBS plugin directory.',
+          isPrimary: !hasPluginBinPath,
+        })
+      }
+    }
+
+    if (entries.length > 0) {
+      return dedupeInstalledLocationEntries(entries)
+    }
+  }
+
+  return [
+    {
+      id: 'install-path',
+      label: 'Install path',
+      path: installedPlugin.installLocation,
+      openLabel: 'Open Install Folder',
+      description:
+        installedPlugin.sourceType === 'external-installer'
+          ? `This install was completed outside ${APP_NAME}. This is the tracked folder for the installed resource.`
+          : 'This is the tracked install location for the resource.',
+      isPrimary: true,
+    },
+  ]
+}
+
+export function getPrimaryInstalledLocation(
+  plugin?: PluginCatalogEntry | null,
+  installedPlugin?:
+    | Pick<
+        InstalledPluginRecord,
+        'downloadPath' | 'installLocation' | 'installedFiles' | 'sourceType'
+      >
+    | null,
+) {
+  const locations = resolveInstalledLocationEntries(plugin, installedPlugin)
+  return locations.find((entry) => entry.isPrimary) ?? locations[0] ?? null
+}
+
+export function compactPathForDisplay(path: string, maxLength = 72) {
+  if (path.length <= maxLength) {
+    return path
+  }
+
+  const prefixLength = Math.max(18, Math.floor((maxLength - 1) / 2))
+  const suffixLength = Math.max(18, maxLength - prefixLength - 1)
+
+  return `${path.slice(0, prefixLength)}…${path.slice(-suffixLength)}`
 }
 
 export function getPluginTypeLabel(
@@ -337,7 +592,7 @@ export function getInstallOwnershipLabel(
 
   switch (installMethod) {
     case 'managed':
-      return 'Installed by OBS Plugin Installer'
+      return `Installed by ${APP_NAME}`
     case 'installer':
       return 'Installed using external installer'
     case 'external':
@@ -514,9 +769,9 @@ export function getPluginCompatibility(
       reason:
         resourceInstallType && resourceInstallType !== 'manual_guide'
           ? resourceInstallType === 'theme_bundle'
-            ? `OBS Plugin Installer can attempt the official OBS resource download and install it into your OBS theme folder on ${platformLabel(normalizedPlatform)}.`
-            : `OBS Plugin Installer can attempt the official OBS resource download and handle it as a ${resourceInstallTypeLabel(resourceInstallType).toLowerCase()} on ${platformLabel(normalizedPlatform)}.`
-          : `OBS Plugin Installer can attempt the official OBS resource download for ${platformLabel(normalizedPlatform)}.`,
+            ? `${APP_NAME} can attempt the official OBS resource download and install it into your OBS theme folder on ${platformLabel(normalizedPlatform)}.`
+            : `${APP_NAME} can attempt the official OBS resource download and handle it as a ${resourceInstallTypeLabel(resourceInstallType).toLowerCase()} on ${platformLabel(normalizedPlatform)}.`
+          : `${APP_NAME} can attempt the official OBS resource download for ${platformLabel(normalizedPlatform)}.`,
       disabledActionLabel: '',
       canViewSource: true,
       requiresReleaseCheck: false,

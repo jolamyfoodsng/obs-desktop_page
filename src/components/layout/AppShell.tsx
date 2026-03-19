@@ -14,6 +14,7 @@ import {
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 
 import { PluginGlyph } from '../../lib/pluginVisuals'
+import { APP_DISCLAIMER, APP_NAME, APP_SUBTITLE } from '../../lib/branding'
 import { getCatalogPluginState, getInstallMethod, isUpdateAvailable } from '../../lib/utils'
 import { useAppStore } from '../../stores/appStore'
 import type { InstallProgressEvent, InstalledPluginRecord } from '../../types/desktop'
@@ -538,9 +539,9 @@ export function AppShell() {
       <div className="flex h-screen overflow-hidden bg-background-dark text-slate-100">
         <aside className="hidden w-56 shrink-0 border-r border-white/10 bg-background-dark lg:flex lg:flex-col">
           <div className="border-b border-white/10 px-4 py-4">
-            <p className="text-[18px] font-semibold text-white">OBS Plugin Installer</p>
+            <p className="text-[18px] font-semibold text-white">{APP_NAME}</p>
             <p className="mt-1 text-[12px] text-slate-500">
-              Desktop plugin manager
+              {APP_SUBTITLE}
             </p>
           </div>
 
@@ -601,6 +602,9 @@ export function AppShell() {
                 Not configured
               </p>
             )}
+            <p className="mt-4 text-[11px] leading-5 text-slate-500">
+              {APP_DISCLAIMER}
+            </p>
           </div>
         </aside>
 
@@ -689,11 +693,7 @@ export function AppShell() {
             : undefined
         }
         onHide={hideInstallProgress}
-        onOpenInstallFolder={
-          lastInstallResponse?.installedPlugin?.installLocation
-            ? () => void revealPath(lastInstallResponse.installedPlugin?.installLocation ?? '')
-            : undefined
-        }
+        onOpenInstallLocation={(path) => void revealPath(path)}
         onOpenInstallerManually={
           lastInstallResponse?.canOpenInstallerManually && lastInstallResponse.manualInstallerPath
             ? () => void openLocalPath(lastInstallResponse.manualInstallerPath ?? '')

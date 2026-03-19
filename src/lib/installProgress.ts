@@ -65,9 +65,23 @@ export function summarizeInstallProgress(
 } {
   const state = resolveInstallModalState(progress, lastResponse)
   const label = pluginName?.trim() || 'Plugin installation'
+  const needsFollowup =
+    lastResponse?.installedPlugin?.status === 'manual-step' ||
+    lastResponse?.installedPlugin?.verificationStatus === 'unverified' ||
+    lastResponse?.installedPlugin?.verificationStatus === 'missing-files'
 
   switch (state) {
     case 'success':
+      if (needsFollowup) {
+        return {
+          label,
+          status: 'Follow-up required',
+          detail: progress.detail ?? lastResponse?.message ?? null,
+          percentLabel: 'Attention',
+          tone: 'warning',
+        }
+      }
+
       return {
         label,
         status: 'Installed successfully',
