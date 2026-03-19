@@ -284,7 +284,7 @@ export function PluginDetailsPage() {
                   ) : shouldShowInstallerAction ? (
                     <Button onClick={handleInstall}>
                       <Download className="size-4" />
-                      Download again
+                      Re-install
                     </Button>
                   ) : isInstalledManaged ? (
                     <Badge
