@@ -100,6 +100,7 @@ interface AppStoreState {
   isApplyingAppUpdate: boolean
   dismissedAppUpdateVersion: string | null
   installProgress: InstallProgressEvent | null
+  isInstallProgressVisible: boolean
   lastInstallResponse: InstallResponse | null
   lastInstallRequest: {
     pluginId: string
@@ -110,7 +111,7 @@ interface AppStoreState {
       githubAssetUrl?: string | null
     }
   } | null
-  loadApp: () => Promise<void>
+  loadApp: (options?: { silent?: boolean }) => Promise<void>
   checkForAppUpdate: (options?: { silent?: boolean; forcePrompt?: boolean }) => Promise<AppUpdateSnapshot | undefined>
   downloadAppUpdate: () => Promise<AppUpdateSnapshot | undefined>
   installAppUpdate: () => Promise<void>
@@ -142,6 +143,8 @@ interface AppStoreState {
   setSearchQuery: (query: string) => void
   setSelectedCategory: (category: string) => void
   setCatalogViewMode: (mode: CatalogViewMode) => void
+  showInstallProgress: () => void
+  hideInstallProgress: () => void
   clearInstallProgress: () => void
   handleInstallProgress: (progress: InstallProgressEvent) => void
   handleAppUpdateProgress: (progress: AppUpdateProgressEvent) => void
@@ -168,24 +171,39 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   isApplyingAppUpdate: false,
   dismissedAppUpdateVersion: readDismissedAppUpdateVersion(),
   installProgress: null,
+  isInstallProgressVisible: false,
   lastInstallResponse: null,
   lastInstallRequest: null,
 
-  async loadApp() {
+  async loadApp(options) {
     if (bootstrapRequest) {
       return bootstrapRequest
     }
 
-    set({ isBootstrapping: true, bootError: null })
+    const silent = options?.silent ?? false
+
+    if (!silent) {
+      set({ isBootstrapping: true, bootError: null })
+    }
 
     bootstrapRequest = (async () => {
       try {
         const bootstrap = await desktopApi.bootstrap()
-        set({ bootstrap, bootError: null, isBootstrapping: false })
+        set((state) => ({
+          bootstrap,
+          bootError: silent ? state.bootError : null,
+          isBootstrapping: silent ? state.isBootstrapping : false,
+        }))
       } catch (error) {
         const message = getErrorMessage(error, 'Failed to load the desktop app state.')
-        set({ bootError: message, isBootstrapping: false })
-        toast.error(message)
+        if (silent) {
+          toast.error(message)
+        } else {
+          set({ bootError: message, isBootstrapping: false })
+        }
+        if (!silent) {
+          toast.error(message)
+        }
       } finally {
         bootstrapRequest = null
       }
@@ -536,6 +554,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
         appUpdateProgress: null,
         dismissedAppUpdateVersion: null,
         installProgress: null,
+        isInstallProgressVisible: false,
         lastInstallResponse: null,
         lastInstallRequest: null,
         cancelingInstallPluginId: null,
@@ -563,6 +582,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
         message: 'Preparing installation',
         detail: 'Starting plugin install workflow.',
       },
+      isInstallProgressVisible: true,
       lastInstallResponse: null,
       lastInstallRequest: { pluginId, options },
       cancelingInstallPluginId: null,
@@ -608,7 +628,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
                   terminal: true,
                 },
           }))
-          await get().loadApp()
+          await get().loadApp({ silent: true })
           return response
         }
 
@@ -653,6 +673,22 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
       }
 
       set({ lastInstallResponse: response })
+      const installedPlugin = response.installedPlugin
+      if (installedPlugin) {
+        set((state) => ({
+          bootstrap: state.bootstrap
+            ? {
+                ...state.bootstrap,
+                installedPlugins: [
+                  ...state.bootstrap.installedPlugins.filter(
+                    (entry) => entry.pluginId !== installedPlugin.pluginId,
+                  ),
+                  installedPlugin,
+                ],
+              }
+            : state.bootstrap,
+        }))
+      }
 
       if (response.installerStarted) {
         toast.success(response.message)
@@ -671,7 +707,7 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
         }),
       )
 
-      await get().loadApp()
+      await get().loadApp({ silent: true })
       set({ cancelingInstallPluginId: null })
       return response
     } catch (error) {
@@ -791,9 +827,20 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     set({ catalogViewMode: mode })
   },
 
+  showInstallProgress() {
+    set((state) => ({
+      isInstallProgressVisible: Boolean(state.installProgress),
+    }))
+  },
+
+  hideInstallProgress() {
+    set({ isInstallProgressVisible: false })
+  },
+
   clearInstallProgress() {
     set({
       installProgress: null,
+      isInstallProgressVisible: false,
       lastInstallResponse: null,
       lastInstallRequest: null,
       cancelingInstallPluginId: null,
@@ -809,12 +856,16 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
       ) {
         return {
           installProgress: state.installProgress,
+          isInstallProgressVisible: state.isInstallProgressVisible,
           cancelingInstallPluginId: null,
         }
       }
 
+      const isSameInstall = state.installProgress?.pluginId === progress.pluginId
+
       return {
         installProgress: progress,
+        isInstallProgressVisible: isSameInstall ? state.isInstallProgressVisible : true,
         cancelingInstallPluginId: progress.terminal ? null : state.cancelingInstallPluginId,
       }
     })

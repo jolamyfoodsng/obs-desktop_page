@@ -19,6 +19,7 @@ import { useAppStore } from '../../stores/appStore'
 import type { InstallProgressEvent, InstalledPluginRecord } from '../../types/desktop'
 import type { PluginCatalogEntry } from '../../types/plugin'
 import { CommandPalette, type CommandPaletteSection } from '../CommandPalette'
+import { GlobalInstallProgressBar } from '../GlobalInstallProgressBar'
 import { InstallProgressModal } from '../InstallProgressModal'
 import { ObsVersionBadge } from '../ObsVersionBadge'
 import { Button } from '../ui/Button'
@@ -190,6 +191,9 @@ export function AppShell() {
   const searchQuery = useAppStore((state) => state.searchQuery)
   const setSearchQuery = useAppStore((state) => state.setSearchQuery)
   const installProgress = useAppStore((state) => state.installProgress)
+  const isInstallProgressVisible = useAppStore((state) => state.isInstallProgressVisible)
+  const hideInstallProgress = useAppStore((state) => state.hideInstallProgress)
+  const showInstallProgress = useAppStore((state) => state.showInstallProgress)
   const clearInstallProgress = useAppStore((state) => state.clearInstallProgress)
   const lastInstallResponse = useAppStore((state) => state.lastInstallResponse)
   const cancelingInstallPluginId = useAppStore((state) => state.cancelingInstallPluginId)
@@ -221,6 +225,7 @@ export function AppShell() {
   const installPluginEntry = installProgress
     ? bootstrap?.plugins.find((plugin) => plugin.id === installProgress.pluginId)
     : undefined
+  const installPluginRouteId = installPluginEntry?.id ?? installProgress?.pluginId ?? null
   const showBackButton = location.pathname !== '/'
 
   const installedByPluginId = useMemo(
@@ -499,6 +504,16 @@ export function AppShell() {
         return
       }
 
+      if (installProgress && isInstallProgressVisible) {
+        event.preventDefault()
+        if (canDismissInstallProgress(installProgress)) {
+          clearInstallProgress()
+        } else {
+          hideInstallProgress()
+        }
+        return
+      }
+
       if (canDismissInstallProgress(installProgress)) {
         event.preventDefault()
         clearInstallProgress()
@@ -507,7 +522,16 @@ export function AppShell() {
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [clearInstallProgress, closeCommandPalette, installProgress, isCommandPaletteOpen, navigate, openCommandPalette])
+  }, [
+    clearInstallProgress,
+    closeCommandPalette,
+    hideInstallProgress,
+    installProgress,
+    isCommandPaletteOpen,
+    isInstallProgressVisible,
+    navigate,
+    openCommandPalette,
+  ])
 
   return (
     <>
@@ -633,6 +657,16 @@ export function AppShell() {
             </div>
           </header>
 
+          {installProgress ? (
+            <GlobalInstallProgressBar
+              lastResponse={lastInstallResponse}
+              onClear={installProgress.terminal ? clearInstallProgress : undefined}
+              onOpenDetails={showInstallProgress}
+              pluginName={installPluginEntry?.name ?? installProgress.pluginId}
+              progress={installProgress}
+            />
+          ) : null}
+
           <main className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-6">
             <Outlet />
           </main>
@@ -640,18 +674,20 @@ export function AppShell() {
       </div>
 
       <InstallProgressModal
+        open={isInstallProgressVisible}
         isCanceling={Boolean(
           installProgress &&
             cancelingInstallPluginId &&
             cancelingInstallPluginId === installProgress.pluginId,
         )}
         lastResponse={lastInstallResponse}
+        onClear={clearInstallProgress}
         onCancelInstall={
           installProgress
             ? () => void cancelInstall(installProgress.pluginId)
             : undefined
         }
-        onClose={clearInstallProgress}
+        onHide={hideInstallProgress}
         onOpenInstallFolder={
           lastInstallResponse?.installedPlugin?.installLocation
             ? () => void revealPath(lastInstallResponse.installedPlugin?.installLocation ?? '')
@@ -675,8 +711,11 @@ export function AppShell() {
             : undefined
         }
         onViewPlugin={
-          installPluginEntry
-            ? () => navigate(`/plugin/${installPluginEntry.id}`)
+          installPluginRouteId
+            ? () => {
+              clearInstallProgress()
+              navigate(`/plugin/${installPluginRouteId}`)
+            }
             : undefined
         }
         plugin={installPluginEntry}

@@ -8,10 +8,11 @@ import {
   ShieldCheck,
   X,
 } from 'lucide-react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import type { InstallProgressEvent, InstallResponse } from '../types/desktop'
 import type { PluginCatalogEntry } from '../types/plugin'
+import { resolveInstallModalState } from '../lib/installProgress'
 import { isScriptPlugin, resolvePrimaryEntryFiles } from '../lib/utils'
 import { ConfirmDialog } from './ui/ConfirmDialog'
 import { Badge } from './ui/Badge'
@@ -19,22 +20,13 @@ import { Button } from './ui/Button'
 import { CopyPathField } from './ui/CopyPathField'
 import { InstallErrorPanel } from './InstallErrorPanel'
 
-type InstallModalState =
-  | 'preparing'
-  | 'downloading'
-  | 'extracting'
-  | 'installing'
-  | 'success'
-  | 'failed'
-  | 'cancelled'
-  | 'review'
-  | 'manual'
-
 interface InstallProgressModalProps {
+  open: boolean
   plugin?: PluginCatalogEntry
   progress: InstallProgressEvent | null
   lastResponse: InstallResponse | null
-  onClose: () => void
+  onHide: () => void
+  onClear: () => void
   onCancelInstall?: () => void
   onOpenInstallFolder?: () => void
   onOpenInstallerManually?: () => void
@@ -108,48 +100,11 @@ function ProgressSteps({
   )
 }
 
-function resolveInstallModalState(
-  progress: InstallProgressEvent,
-  lastResponse: InstallResponse | null,
-): InstallModalState {
-  if (progress.stage === 'canceled' || lastResponse?.code === 'CANCELED') {
-    return 'cancelled'
-  }
-
-  if (progress.stage === 'error') {
-    return 'failed'
-  }
-
-  if (progress.stage === 'review' || Boolean(lastResponse?.reviewPlan)) {
-    return 'review'
-  }
-
-  if (progress.stage === 'manual') {
-    return 'manual'
-  }
-
-  if (progress.stage === 'completed' && lastResponse?.success) {
-    return 'success'
-  }
-
-  if (progress.stage === 'preparing') {
-    return 'preparing'
-  }
-
-  if (progress.stage === 'downloading' || progress.stage === 'verifying') {
-    return 'downloading'
-  }
-
-  if (progress.stage === 'extracting' || progress.stage === 'inspecting') {
-    return 'extracting'
-  }
-
-  return 'installing'
-}
-
 export function InstallProgressModal({
+  open,
   lastResponse,
-  onClose,
+  onClear,
+  onHide,
   onCancelInstall,
   onOpenInstallFolder,
   onOpenInstallerManually,
@@ -162,7 +117,13 @@ export function InstallProgressModal({
 }: InstallProgressModalProps) {
   const [confirmingClose, setConfirmingClose] = useState(false)
 
-  if (!progress) {
+  useEffect(() => {
+    if (!open) {
+      setConfirmingClose(false)
+    }
+  }, [open])
+
+  if (!progress || !open) {
     return null
   }
 
@@ -201,6 +162,14 @@ export function InstallProgressModal({
     isSuccess &&
     !isScriptInstall &&
     Boolean(plugin?.obsFollowupSteps?.length || resolvedEntryFiles.length)
+  const handleDismiss = () => {
+    if (isActiveInstall) {
+      onHide()
+      return
+    }
+
+    onClear()
+  }
 
   const title = (() => {
     if (isError) {
@@ -216,7 +185,7 @@ export function InstallProgressModal({
     }
 
     if (isManual) {
-      return installerStarted ? 'Installer started' : 'Installer downloaded'
+      return installerStarted ? 'Waiting for installer to complete' : 'Installer downloaded'
     }
 
     if (isSuccess && isScriptInstall) {
@@ -231,7 +200,14 @@ export function InstallProgressModal({
   })()
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#06070b]/68 p-6 backdrop-blur-sm">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[#06070b]/68 p-6 backdrop-blur-sm"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          handleDismiss()
+        }
+      }}
+    >
       <div className="w-full max-w-2xl rounded-xl border border-white/10 bg-background-dark p-5 shadow-panel">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -242,14 +218,7 @@ export function InstallProgressModal({
           </div>
           <button
             className="rounded-lg border border-white/10 p-2 text-slate-500 transition-colors hover:bg-white/[0.04] hover:text-white"
-            onClick={() => {
-              if (canCancel) {
-                setConfirmingClose(true)
-                return
-              }
-
-              onClose()
-            }}
+            onClick={handleDismiss}
             type="button"
             disabled={isCanceling}
           >
@@ -293,7 +262,7 @@ export function InstallProgressModal({
                   View Plugin Details
                 </Button>
               ) : null}
-              <Button variant="ghost" onClick={onClose}>
+              <Button variant="ghost" onClick={onClear}>
                 Close
               </Button>
             </div>
@@ -339,7 +308,7 @@ export function InstallProgressModal({
                       View Plugin Details
                     </Button>
                   ) : null}
-                  <Button variant="ghost" onClick={onClose}>
+                  <Button variant="ghost" onClick={onClear}>
                     Close
                   </Button>
                 </div>
@@ -365,7 +334,7 @@ export function InstallProgressModal({
                       View Plugin Details
                     </Button>
                   ) : null}
-                  <Button variant="ghost" onClick={onClose}>
+                  <Button variant="ghost" onClick={onClear}>
                     Close
                   </Button>
                 </div>
@@ -375,7 +344,7 @@ export function InstallProgressModal({
                 <div className="rounded-lg border border-primary/20 bg-primary/10 p-4">
                   <p className="text-sm font-semibold text-white">
                     {installerStarted
-                      ? 'The installer started successfully.'
+                      ? 'The installer is running outside the app.'
                       : 'The installer is ready to open manually.'}
                   </p>
                   <p className="mt-1 text-sm leading-7 text-slate-300">
@@ -401,7 +370,7 @@ export function InstallProgressModal({
                       View Plugin Details
                     </Button>
                   ) : null}
-                  <Button variant="ghost" onClick={onClose}>
+                  <Button variant="ghost" onClick={onClear}>
                     Close
                   </Button>
                 </div>
@@ -455,7 +424,7 @@ export function InstallProgressModal({
                       View Plugin Details
                     </Button>
                   ) : null}
-                  <Button variant="ghost" onClick={onClose}>
+                  <Button variant="ghost" onClick={onClear}>
                     Close
                   </Button>
                 </div>
@@ -491,14 +460,14 @@ export function InstallProgressModal({
                       <Button
                         disabled={isCanceling}
                         variant="outline"
-                        onClick={() => void onCancelInstall?.()}
+                        onClick={() => setConfirmingClose(true)}
                       >
                         {isCanceling ? 'Canceling…' : cancelLabel}
                       </Button>
                     ) : null}
                     <Badge tone="neutral">
-                    <ShieldCheck className="size-3.5" />
-                    Safe install workflow
+                      <ShieldCheck className="size-3.5" />
+                      Safe install workflow
                     </Badge>
                   </div>
                 </div>

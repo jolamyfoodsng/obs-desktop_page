@@ -1902,7 +1902,7 @@ fn external_install_guidance(
     match file_type {
         Some(PluginPackageFileType::Exe) | Some(PluginPackageFileType::Msi) => (
             "Windows installer",
-            "The Windows installer started successfully. Follow the vendor prompts, then reopen OBS if needed.",
+            "The Windows installer is running outside OBS Plugin Installer. Complete any admin, UAC, or PowerShell prompts there, then return to the app.",
             false,
         ),
         Some(PluginPackageFileType::Pkg) | Some(PluginPackageFileType::Dmg) => (
@@ -2126,7 +2126,7 @@ fn finalize_external_download(
         "manual",
         100,
         if installer_started {
-            "Installer started".to_string()
+            "Waiting for installer to complete".to_string()
         } else {
             format!("{} downloaded", label)
         },
