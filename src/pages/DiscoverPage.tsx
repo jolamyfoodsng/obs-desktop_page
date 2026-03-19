@@ -150,6 +150,9 @@ export function DiscoverPage() {
             <p className="mt-1 text-[14px] text-slate-400">
               Browse curated plugins and official OBS resources for {currentPlatform === 'macos' ? 'macOS' : currentPlatform}.
             </p>
+            <p className="mt-1 text-[9px] text-slate-400">
+            Note: We don’t host or store plugin files. All plugins are downloaded directly from their official sources (such as OBS or the original developer) and installed on your system.
+            </p>
           </div>
           <div className="flex items-center gap-2">
             <Badge tone="neutral">{catalogCount} total</Badge>
