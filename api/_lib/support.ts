@@ -259,13 +259,31 @@ export function buildSupportFallbackMailto(submission: NormalizedSupportSubmissi
   return `mailto:${supportInbox}?${query.toString()}`
 }
 
+export function resolveSupportRelayConfig(env: NodeJS.ProcessEnv = process.env) {
+  const resendApiKey = env.RESEND_API_KEY?.trim() || null
+  const supportInbox =
+    env.SUPPORT_INBOX_EMAIL?.trim() ||
+    env.SUPPORT_EMAIL?.trim() ||
+    null
+  const fromEmail =
+    env.SUPPORT_FROM_EMAIL?.trim() ||
+    env.FROM_EMAIL?.trim() ||
+    null
+
+  return {
+    resendApiKey,
+    supportInbox,
+    fromEmail,
+  }
+}
+
 export async function deliverSupportSubmission(submission: NormalizedSupportSubmission) {
-  const resendApiKey = process.env.RESEND_API_KEY?.trim()
-  const supportInbox = process.env.SUPPORT_INBOX_EMAIL?.trim()
-  const fromEmail = process.env.SUPPORT_FROM_EMAIL?.trim()
+  const { resendApiKey, supportInbox, fromEmail } = resolveSupportRelayConfig()
 
   if (!resendApiKey || !supportInbox || !fromEmail) {
-    throw new Error('Support email relay is not configured. Set RESEND_API_KEY, SUPPORT_INBOX_EMAIL, and SUPPORT_FROM_EMAIL.')
+    throw new Error(
+      'Support email relay is not configured. Set RESEND_API_KEY, SUPPORT_INBOX_EMAIL or SUPPORT_EMAIL, and SUPPORT_FROM_EMAIL or FROM_EMAIL.',
+    )
   }
 
   const subjectPrefix = `[OBS Plugin Installer] ${labelForKind(submission.kind)}`
