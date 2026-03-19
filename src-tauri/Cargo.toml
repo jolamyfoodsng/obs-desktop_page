@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.33.0"
+version = "0.34.0"
 description = "OBS Plugin Installer desktop app built with Tauri"
 authors = ["OBS Plugin Installer contributors"]
 edition = "2021"
