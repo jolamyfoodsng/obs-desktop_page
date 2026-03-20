@@ -271,7 +271,7 @@ function App() {
     return (
       <>
         <LoadingScreen />
-        <Toaster position="top-right" richColors theme={toasterTheme} />
+        <Toaster position="bottom-right" richColors theme={toasterTheme} />
       </>
     )
   }
@@ -286,7 +286,7 @@ function App() {
             void loadApp()
           }}
         />
-        <Toaster position="top-right" richColors theme={toasterTheme} />
+        <Toaster position="bottom-right" richColors theme={toasterTheme} />
       </>
     )
   }
@@ -295,7 +295,7 @@ function App() {
     return (
       <>
         <LoadingScreen />
-        <Toaster position="top-right" richColors theme={toasterTheme} />
+        <Toaster position="bottom-right" richColors theme={toasterTheme} />
       </>
     )
   }
@@ -304,7 +304,7 @@ function App() {
     return (
       <>
         <LoadingScreen />
-        <Toaster position="top-right" richColors theme={toasterTheme} />
+        <Toaster position="bottom-right" richColors theme={toasterTheme} />
       </>
     )
   }
@@ -420,7 +420,7 @@ function App() {
           status={appUpdateStatus}
         />
       ) : null}
-      <Toaster position="top-right" richColors theme={toasterTheme} />
+      <Toaster position="bottom-right" richColors theme={toasterTheme} />
     </>
   )
 }
