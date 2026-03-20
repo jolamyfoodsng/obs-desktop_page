@@ -708,20 +708,18 @@ fn merge_installed_records(
     merged
 }
 
-fn sync_install_statuses(app: &AppHandle, mut state: PersistedState) -> PersistedState {
+fn sync_install_statuses(
+    app: &AppHandle,
+    mut state: PersistedState,
+    obs_version: Option<&str>,
+) -> PersistedState {
     let mut installed_plugins = state
         .installed_plugins
         .values()
         .cloned()
         .collect::<Vec<_>>();
     let plugins = load_plugin_catalog().unwrap_or_default();
-    let detection = detect_obs_installation(app, &state.settings);
-
-    let changed = refresh_installed_records(
-        &mut installed_plugins,
-        &plugins,
-        detection.obs_version.as_deref(),
-    );
+    let changed = refresh_installed_records(&mut installed_plugins, &plugins, obs_version);
 
     if changed {
         state.installed_plugins.clear();
@@ -750,8 +748,8 @@ pub fn bootstrap(app: AppHandle) -> Result<BootstrapPayload, String> {
             PersistedState::default()
         }
     };
-    let state = sync_install_statuses(&app, state);
     let detection = detect_obs_installation(&app, &state.settings);
+    let state = sync_install_statuses(&app, state, detection.obs_version.as_deref());
     let plugins = load_plugin_catalog().map_err(|error| error.to_string())?;
     let tracked_plugins = state
         .installed_plugins

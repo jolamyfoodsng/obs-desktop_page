@@ -5,6 +5,10 @@ use std::process::Command;
 
 use regex::Regex;
 use tauri::AppHandle;
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::Storage::FileSystem::{
+    GetFileVersionInfoSizeW, GetFileVersionInfoW, VerQueryValueW, VS_FIXEDFILEINFO,
+};
 
 use crate::models::plugin::SupportedPlatform;
 use crate::models::state::ObsDetectionState;
@@ -32,6 +36,79 @@ fn extract_version(value: &str) -> Option<String> {
     Some(matched)
 }
 
+#[cfg(target_os = "windows")]
+fn format_windows_file_version(ms: u32, ls: u32) -> Option<String> {
+    let major = ms >> 16;
+    let minor = ms & 0xffff;
+    let patch = ls >> 16;
+    let build = ls & 0xffff;
+
+    if major == 0 && minor == 0 && patch == 0 && build == 0 {
+        return None;
+    }
+
+    Some(if build > 0 {
+        format!("{major}.{minor}.{patch}.{build}")
+    } else {
+        format!("{major}.{minor}.{patch}")
+    })
+}
+
+#[cfg(target_os = "windows")]
+fn detect_windows_file_version(executable: &Path) -> Option<String> {
+    let wide_path = executable
+        .as_os_str()
+        .to_string_lossy()
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let mut handle = 0u32;
+    let info_size = unsafe { GetFileVersionInfoSizeW(wide_path.as_ptr(), &mut handle) };
+    if info_size == 0 {
+        return None;
+    }
+
+    let mut buffer = vec![0u8; info_size as usize];
+    let loaded = unsafe {
+        GetFileVersionInfoW(wide_path.as_ptr(), 0, info_size, buffer.as_mut_ptr().cast())
+    };
+    if loaded == 0 {
+        return None;
+    }
+
+    let mut value_ptr = std::ptr::null_mut();
+    let mut value_len = 0u32;
+    let root_query = ['\\' as u16, 0];
+    let queried = unsafe {
+        VerQueryValueW(
+            buffer.as_ptr().cast(),
+            root_query.as_ptr(),
+            &mut value_ptr,
+            &mut value_len,
+        )
+    };
+    if queried == 0
+        || value_ptr.is_null()
+        || value_len < std::mem::size_of::<VS_FIXEDFILEINFO>() as u32
+    {
+        return None;
+    }
+
+    let version_info = unsafe { &*(value_ptr.cast::<VS_FIXEDFILEINFO>()) };
+    if version_info.dwSignature != 0xfeef04bd {
+        return None;
+    }
+
+    format_windows_file_version(
+        version_info.dwProductVersionMS,
+        version_info.dwProductVersionLS,
+    )
+    .or_else(|| {
+        format_windows_file_version(version_info.dwFileVersionMS, version_info.dwFileVersionLS)
+    })
+}
+
+#[cfg(target_os = "windows")]
 fn detect_windows_obs_version(root: &Path) -> Option<String> {
     let executable = if root.join("bin").join("64bit").join("obs64.exe").exists() {
         root.join("bin").join("64bit").join("obs64.exe")
@@ -41,24 +118,12 @@ fn detect_windows_obs_version(root: &Path) -> Option<String> {
         return None;
     };
 
-    let escaped = executable.display().to_string().replace('\'', "''");
-    let output = Command::new("powershell")
-        .args([
-            "-NoProfile",
-            "-Command",
-            &format!(
-                "(Get-Item -LiteralPath '{}').VersionInfo.ProductVersion",
-                escaped
-            ),
-        ])
-        .output()
-        .ok()?;
+    detect_windows_file_version(&executable)
+}
 
-    if !output.status.success() {
-        return None;
-    }
-
-    extract_version(&String::from_utf8_lossy(&output.stdout))
+#[cfg(not(target_os = "windows"))]
+fn detect_windows_obs_version(_root: &Path) -> Option<String> {
+    None
 }
 
 fn detect_macos_obs_version(app_bundle: &Path) -> Option<String> {
