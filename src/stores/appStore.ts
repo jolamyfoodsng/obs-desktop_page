@@ -762,13 +762,43 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
   },
 
   async uninstallPlugin(pluginId) {
+    const bootstrap = get().bootstrap
+    const plugin = bootstrap?.plugins.find((entry) => entry.id === pluginId)
+    const existingInstall = bootstrap?.installedPlugins.find((entry) => entry.pluginId === pluginId)
+
     set({ uninstallingPluginId: pluginId })
 
     try {
       const response = await desktopApi.uninstallPlugin(pluginId)
-      set({ uninstallingPluginId: null })
-      toast.success(response.message)
-      await get().loadApp()
+      set((state) => ({
+        uninstallingPluginId: null,
+        bootstrap: state.bootstrap
+          ? {
+              ...state.bootstrap,
+              installedPlugins: state.bootstrap.installedPlugins.filter(
+                (entry) => entry.pluginId !== pluginId,
+              ),
+              installHistory: [
+                ...state.bootstrap.installHistory,
+                {
+                  pluginId,
+                  pluginName: plugin?.name ?? pluginId,
+                  version: existingInstall?.installedVersion ?? null,
+                  action: 'uninstall',
+                  managed: existingInstall?.managed ?? true,
+                  installLocation: existingInstall?.installLocation ?? null,
+                  message: response.message,
+                  timestamp: new Date().toISOString(),
+                  fileCount: response.removedFiles,
+                  backupRoot: existingInstall?.backup?.backupRoot ?? null,
+                  verificationStatus: existingInstall?.verificationStatus ?? null,
+                },
+              ],
+            }
+          : state.bootstrap,
+      }))
+      toast.success(`${plugin?.name ?? pluginId} was deleted.`)
+      void get().loadApp({ silent: true })
       return response
     } catch (error) {
       set({ uninstallingPluginId: null })
