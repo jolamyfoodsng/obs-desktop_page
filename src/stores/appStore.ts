@@ -82,6 +82,33 @@ function classifyAppUpdate(snapshot: AppUpdateSnapshot): AppUpdateStatus {
   return 'no-update'
 }
 
+function createFailedAppUpdateSnapshot(
+  currentVersion: string,
+  updateChannel: 'stable' | 'beta',
+  message: string,
+): AppUpdateSnapshot {
+  return {
+    status: 'failed',
+    message,
+    currentVersion,
+    latestVersion: null,
+    minimumSupportedVersion: null,
+    releaseNotes: null,
+    publishedAt: null,
+    updateChannel,
+    releaseTag: null,
+    releaseUrl: null,
+    selectedAssetName: null,
+    selectedAssetReason: null,
+    selectedAssetUrl: null,
+    selectedAssetSize: null,
+    manualFallbackName: null,
+    manualFallbackReason: null,
+    manualFallbackUrl: null,
+    manualFallbackSize: null,
+  }
+}
+
 interface AppStoreState {
   bootstrap: BootstrapPayload | null
   bootError: string | null
@@ -263,33 +290,15 @@ export const useAppStore = create<AppStoreState>((set, get) => ({
     } catch (error) {
       const message = getErrorMessage(error, 'Could not check for app updates.')
       set((state) => ({
-        appUpdate: state.appUpdate
-          ? {
-            ...state.appUpdate,
-            status: 'failed',
-            message,
-          }
-          : {
-            status: 'failed',
-            message,
-            currentVersion: state.bootstrap?.currentVersion ?? '0.0.0',
-            latestVersion: null,
-            minimumSupportedVersion: null,
-            releaseNotes: null,
-            publishedAt: null,
-            updateChannel: state.bootstrap?.settings.betaUpdates ? 'beta' : 'stable',
-            releaseTag: null,
-            releaseUrl: null,
-            selectedAssetName: null,
-            selectedAssetReason: null,
-            selectedAssetUrl: null,
-            selectedAssetSize: null,
-            manualFallbackName: null,
-            manualFallbackReason: null,
-            manualFallbackUrl: null,
-            manualFallbackSize: null,
-          },
-        appUpdateStatus: 'failed',
+        appUpdate:
+          state.appUpdateStatus === 'ready-to-restart' && state.appUpdate
+            ? state.appUpdate
+            : createFailedAppUpdateSnapshot(
+                state.bootstrap?.currentVersion ?? '0.0.0',
+                state.bootstrap?.settings.betaUpdates ? 'beta' : 'stable',
+                message,
+              ),
+        appUpdateStatus: state.appUpdateStatus === 'ready-to-restart' ? 'ready-to-restart' : 'failed',
         appUpdateProgress: null,
         isCheckingAppUpdate: false,
       }))

@@ -54,6 +54,21 @@ export function AppUpdateDialog({
     return null
   }
 
+  const eyebrowLabel =
+    status === 'failed'
+      ? 'Update failed'
+      : isRequired
+        ? 'Update required'
+        : 'Update available'
+  const title =
+    status === 'ready-to-restart'
+      ? 'Restart to finish updating'
+      : status === 'failed'
+        ? 'Could not complete the update'
+        : isRequired
+          ? 'This app build needs an update'
+          : 'A newer app build is ready'
+
   return (
     <div className="fixed inset-0 z-[65] flex items-end justify-end bg-[#06070b]/36 p-5 backdrop-blur-sm">
       <div className="w-full max-w-md rounded-[28px] border border-white/10 bg-background-dark p-5 shadow-panel">
@@ -63,15 +78,9 @@ export function AppUpdateDialog({
           </div>
           <div className="min-w-0 flex-1">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-primary/80">
-              {isRequired ? 'Update required' : 'Update available'}
+              {eyebrowLabel}
             </p>
-            <h2 className="mt-2 text-xl font-semibold tracking-tight text-white">
-              {status === 'ready-to-restart'
-                ? 'Restart to finish updating'
-                : isRequired
-                  ? 'This app build needs an update'
-                  : 'A newer app build is ready'}
-            </h2>
+            <h2 className="mt-2 text-xl font-semibold tracking-tight text-white">{title}</h2>
             <p className="mt-2 text-sm leading-7 text-slate-400">{snapshot.message}</p>
           </div>
         </div>

@@ -320,8 +320,7 @@ function App() {
       appUpdateStatus === 'downloading' ||
       appUpdateStatus === 'ready-to-restart' ||
       (appUpdateStatus === 'failed' &&
-        (Boolean(appUpdate.latestVersion || appUpdate.manualFallbackUrl || appUpdate.selectedAssetUrl) ||
-          appUpdate.status === 'failed'))),
+        Boolean(appUpdate.manualFallbackUrl || appUpdate.selectedAssetUrl))),
   )
 
   // Trace the decision path for the update modal
